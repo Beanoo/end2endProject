@@ -45,20 +45,27 @@ function runCommand({ cwd, args, fileName, runDir }) {
   }
 }
 
-function saveDiff({ worktreePath, runDir }) {
-  execFileSync("git", ["add", "-N", "."], {
-    cwd: worktreePath,
+function saveDiff({ gitRootPath, targetRelativePath, runDir }) {
+  const pathspec = targetRelativePath || ".";
+  execFileSync("git", ["add", "-N", pathspec], {
+    cwd: gitRootPath,
     encoding: "utf8",
   });
-  const diff = execFileSync("git", ["diff"], {
-    cwd: worktreePath,
+  const diff = execFileSync("git", ["diff", "--", pathspec], {
+    cwd: gitRootPath,
     encoding: "utf8",
   });
   fs.writeFileSync(path.join(runDir, "changes.patch"), diff);
   return diff;
 }
 
-function runVerification({ worktreePath, targetRepo, runDir }) {
+function runVerification({
+  worktreePath,
+  gitRootPath = worktreePath,
+  targetRelativePath = ".",
+  targetRepo,
+  runDir,
+}) {
   const dependencies = ensureNodeModules({ worktreePath, targetRepo, runDir });
   const vitestConfig = path.join(worktreePath, ".vitest-p1.config.mjs");
   fs.writeFileSync(
@@ -85,7 +92,7 @@ function runVerification({ worktreePath, targetRepo, runDir }) {
     fileName: "build-output.txt",
     runDir,
   });
-  const diff = saveDiff({ worktreePath, runDir });
+  const diff = saveDiff({ gitRootPath, targetRelativePath, runDir });
 
   return {
     name: "verification",

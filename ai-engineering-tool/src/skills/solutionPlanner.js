@@ -1,15 +1,22 @@
-function planSolution() {
+function planSolution({ requirement }) {
+  const title = requirement?.data?.title || "Conduit 增量需求";
   return {
     name: "solution_planning",
     status: "completed",
-    summary: "已生成 L1 前端增量方案，代码写入在 P1 作为受控 patch 执行。",
+    summary: `已生成通用需求处理方案：${title}`,
     data: {
       tasks: [
         "在 Conduit worktree 中创建隔离分支。",
-        "定位文章详情页渲染文件。",
-        "P1 增加字数/阅读时间计算 helper。",
-        "P1 将结果渲染到文章正文下方。",
-        "运行测试和前端构建。",
+        "基于需求和仓库索引定位前后端相关模块。",
+        "由模型在动态编辑边界内生成 unified diff patch。",
+        "patch 应用失败时进入模型修复循环。",
+        "根据实际变更运行测试、构建并保存 diff。",
+      ],
+      constraints: [
+        "AI 工程工具保持独立，不写入 Conduit 工具代码。",
+        "代码修改必须发生在 Conduit worktree 中。",
+        "禁止修改 node_modules、dist、lockfile、环境变量文件。",
+        "P2 暂不实现可交互人工确认节点，但保留 stage 数据结构。",
       ],
       humanGates: ["确认需求", "确认模块边界", "确认 patch 后再 PR"],
     },
@@ -17,4 +24,3 @@ function planSolution() {
 }
 
 module.exports = planSolution;
-

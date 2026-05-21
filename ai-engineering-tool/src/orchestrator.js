@@ -59,21 +59,40 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
     const planStage = completeStage(runDir, planSolution({ requirement: requirementStage }));
 
     const gitWorktree = createPlanningWorktree(target, runId);
+    const targetRelativePath = path.relative(repoStatus.root, target);
+    const worktreeTargetPath = targetRelativePath
+      ? path.join(gitWorktree.path, targetRelativePath)
+      : gitWorktree.path;
+    gitWorktree.targetPath = worktreeTargetPath;
+    gitWorktree.targetRelativePath = targetRelativePath || ".";
     writeEvent(runDir, { type: "worktree_created", gitWorktree });
 
-    const moduleStage = completeStage(runDir, locateModules(gitWorktree.path));
+    const moduleStage = completeStage(
+      runDir,
+      await locateModules(worktreeTargetPath, { requirementStage, runDir }),
+    );
     const codeStage = completeStage(
       runDir,
       await generateAndApplyPatch({
         runDir,
-        worktreePath: gitWorktree.path,
+        worktreePath: worktreeTargetPath,
+        gitRootPath: gitWorktree.path,
+        targetRelativePath,
         requirementStage,
+        planStage,
+        moduleStage,
       }),
     );
-    const testStage = completeStage(runDir, planTests());
+    const testStage = completeStage(runDir, planTests({ moduleStage }));
     const verificationStage = completeStage(
       runDir,
-      runVerification({ worktreePath: gitWorktree.path, targetRepo: target, runDir }),
+      runVerification({
+        worktreePath: worktreeTargetPath,
+        gitRootPath: gitWorktree.path,
+        targetRelativePath,
+        targetRepo: target,
+        runDir,
+      }),
     );
     const deliveryStage = completeStage(
       runDir,
@@ -87,6 +106,7 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
     const result = {
       runId,
       status: "completed_with_gates",
+      requirement,
       startedAt,
       completedAt: new Date().toISOString(),
       targetRepo: target,
@@ -115,6 +135,7 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
     const failedResult = {
       runId,
       status: "failed",
+      requirement,
       startedAt,
       completedAt: new Date().toISOString(),
       targetRepo: target,

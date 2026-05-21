@@ -4,11 +4,13 @@ const path = require("path");
 function writeDeliveryReport({ runDir, result }) {
   const verification = result.stages.find((stage) => stage.name === "verification");
   const codeGeneration = result.stages.find((stage) => stage.name === "code_generation");
-  const report = `# P1 提测说明
+  const moduleLocation = result.stages.find((stage) => stage.name === "module_location");
+  const touchedFiles = codeGeneration?.data?.touchedFiles || moduleLocation?.data?.editBoundary || [];
+  const report = `# AI 工程工具提测说明
 
 ## 需求
 
-${result.requirement}
+${result.requirement || "未记录原始需求"}
 
 ## 运行信息
 
@@ -20,6 +22,11 @@ ${result.requirement}
 
 - 状态: ${codeGeneration?.status || "unknown"}
 - 说明: ${codeGeneration?.summary || ""}
+- 应用方式: ${codeGeneration?.data?.appliedBy || "unknown"}
+
+## 变更文件
+
+${touchedFiles.map((file) => `- ${file}`).join("\n") || "- 未记录"}
 
 ## 验证结果
 
@@ -36,10 +43,10 @@ npm run build -w frontend
 
 ## 人工验收
 
-1. 打开文章详情页。
-2. 确认正文下方展示“本文共 XXX 字，预计阅读 X 分钟”。
-3. 确认文章标签仍正常展示。
-4. 确认未修改后端接口和数据库 schema。
+1. 根据需求打开受影响的 Conduit 页面或 API。
+2. 对照验收标准检查核心行为。
+3. 检查本次 diff 是否只落在模块定位阶段给出的边界内。
+4. 如果涉及后端接口，补充 API 手工验证或 E2E 验证。
 `;
 
   fs.writeFileSync(path.join(runDir, "delivery-report.md"), report);
@@ -48,4 +55,3 @@ npm run build -w frontend
 module.exports = {
   writeDeliveryReport,
 };
-
