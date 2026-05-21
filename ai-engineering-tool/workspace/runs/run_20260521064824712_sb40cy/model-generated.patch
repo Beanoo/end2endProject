@@ -1,0 +1,69 @@
+diff --git a/frontend/src/helpers/articleStats.js b/frontend/src/helpers/articleStats.js
+new file mode 100644
+index 0000000..2d7f9c5
+--- /dev/null
++++ b/frontend/src/helpers/articleStats.js
+@@ -0,0 +1,13 @@
++export default function getArticleStats(body) {
++  if (!body) {
++    return { totalWords: 0, estimatedMinutes: 0 };
++  }
++  // 移除基础Markdown标记后统计纯文本字数
++  const plainText = body.replace(/[#*`\[\]()\-!~>]/g, '').replace(/\s+/g, ' ').trim();
++  const totalWords = plainText.length;
++  // 按平均每分钟200字计算阅读时长，向上取整，最少1分钟
++  const estimatedMinutes = totalWords === 0 ? 0 : Math.max(1, Math.ceil(totalWords / 200));
++  return { totalWords, estimatedMinutes };
++}
++
+diff --git a/frontend/src/helpers/articleStats.test.js b/frontend/src/helpers/articleStats.test.js
+new file mode 100644
+index 0000000..f8d7a29
+--- /dev/null
++++ b/frontend/src/helpers/articleStats.test.js
+@@ -0,0 +1,21 @@
++import getArticleStats from './articleStats';
++
++describe('getArticleStats utility', () => {
++  it('returns zero stats for empty/non-existent body', () => {
++    expect(getArticleStats('')).toEqual({ totalWords: 0, estimatedMinutes: 0 });
++    expect(getArticleStats(null)).toEqual({ totalWords: 0, estimatedMinutes: 0 });
++    expect(getArticleStats(undefined)).toEqual({ totalWords: 0, estimatedMinutes: 0 });
++  });
++
++  it('returns 1 minute estimated reading time for short content', () => {
++    const shortBody = 'This is a short test article content.';
++    const stats = getArticleStats(shortBody);
++    expect(stats.totalWords).toBeGreaterThan(0);
++    expect(stats.estimatedMinutes).toBe(1);
++  });
++
++  it('calculates correct reading time for long content', () => {
++    const longBody = '中文字符测试内容'.repeat(100);
++    expect(getArticleStats(longBody).estimatedMinutes).toBe(3);
++  });
++});
+diff --git a/frontend/src/routes/Article/Article.jsx b/frontend/src/routes/Article/Article.jsx
+index 7a8f9d2..1e9d7c3 100644
+--- a/frontend/src/routes/Article/Article.jsx
++++ b/frontend/src/routes/Article/Article.jsx
+@@ -8,6 +8,7 @@ import ArticleTags from "../../components/ArticleTags";
+ import BannerContainer from "../../components/BannerContainer";
+ import { useAuth } from "../../context/AuthContext";
+ import getArticle from "../../services/getArticle";
++import getArticleStats from "../../helpers/articleStats";
+ 
+ function Article() {
+   const { state } = useLocation();
+@@ -37,6 +38,9 @@ function Article() {
+       <div className="container page">
+         <div className="row article-content">
+           <div className="col-md-12">
+-            {body && <Markdown options={{ forceBlock: true }}>{body}</Markdown>}
++            {body && <Markdown options={{ forceBlock: true }}>{body}</Markdown>}
++            {body && (
++              <p className="text-muted mt-3 mb-4">本文共 {getArticleStats(body).totalWords} 字，预计阅读 {getArticleStats(body).estimatedMinutes} 分钟</p>
++            )}
+             <ArticleTags tagList={tagList} />
+           </div>
+         </div>

@@ -1,0 +1,29 @@
+{
+  "runId": "run_20260521062434098_g5r48v",
+  "status": "failed",
+  "startedAt": "2026-05-21T06:24:34.099Z",
+  "completedAt": "2026-05-21T06:26:15.725Z",
+  "targetRepo": "/Users/doumengyao/work/end2endProject/conduit-realworld-example-app-filtered",
+  "repoStatus": {
+    "branch": "main",
+    "gitDir": ".git",
+    "head": "d9500b503cfdf17394cb1091d33684b22d44c5d7",
+    "isDirty": true,
+    "root": "/Users/doumengyao/work/end2endProject/conduit-realworld-example-app-filtered",
+    "status": [
+      "M backend/config/config.js",
+      " M package-lock.json",
+      " M package.json",
+      "?? docs/"
+    ]
+  },
+  "error": {
+    "message": "Patch touches disallowed files: dev/null",
+    "status": 422
+  },
+  "artifacts": {
+    "events": "workspace/runs/run_20260521062434098_g5r48v/events.jsonl",
+    "result": "workspace/runs/run_20260521062434098_g5r48v/result.json",
+    "knowledge": "workspace/runs/run_20260521062434098_g5r48v/knowledge-draft.json"
+  }
+}

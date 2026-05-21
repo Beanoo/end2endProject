@@ -1,0 +1,8 @@
+{
+  "pattern": "frontend-only article detail enhancement",
+  "targetRepo": "/Users/doumengyao/work/end2endProject/conduit-realworld-example-app-filtered",
+  "reusableFiles": [
+    "frontend/src/routes/Article/Article.jsx"
+  ],
+  "nextStep": "P1 should apply a controlled patch in the worktree."
+}

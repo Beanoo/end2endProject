@@ -1,0 +1,28 @@
+
+> conduit-realworld-example-app@1.0.0 test
+> vitest
+
+
+ RUN  v4.0.18 /Users/doumengyao/work/end2endProject/ai-engineering-tool/workspace/worktrees/run_20260521064824712_sb40cy
+
+ ❯ frontend/src/helpers/errorHandler.test.js (0 test)
+ ❯ frontend/src/helpers/articleStats.test.js (0 test)
+ ❯ frontend/src/helpers/dateFormatter.test.js (0 test)
+ ❯ backend/helper/helpers.test.js (0 test)
+
+ Test Files  4 failed (4)
+      Tests  no tests
+   Start at  14:50:02
+   Duration  871ms (transform 0ms, setup 0ms, import 0ms, tests 0ms, environment 2.88s)
+
+
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  backend/helper/helpers.test.js [ backend/helper/helpers.test.js ]
+ FAIL  frontend/src/helpers/articleStats.test.js [ frontend/src/helpers/articleStats.test.js ]
+ FAIL  frontend/src/helpers/dateFormatter.test.js [ frontend/src/helpers/dateFormatter.test.js ]
+ FAIL  frontend/src/helpers/errorHandler.test.js [ frontend/src/helpers/errorHandler.test.js ]
+Error: Cannot find module '/@fs/Users/doumengyao/work/end2endProject/conduit-realworld-example-app-filtered/frontend/src/setupTests.js'
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+

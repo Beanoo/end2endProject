@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Engineering Tool</title>
+    <style>
+      body {
+        color: #202124;
+        font-family: Arial, sans-serif;
+        margin: 0;
+      }
+
+      main {
+        margin: 0 auto;
+        max-width: 1080px;
+        padding: 32px;
+      }
+
+      textarea {
+        box-sizing: border-box;
+        font: inherit;
+        min-height: 120px;
+        padding: 12px;
+        resize: vertical;
+        width: 100%;
+      }
+
+      button {
+        background: #2f6fed;
+        border: 0;
+        color: white;
+        cursor: pointer;
+        font: inherit;
+        margin-top: 12px;
+        padding: 10px 16px;
+      }
+
+      button:disabled {
+        opacity: 0.55;
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .stage {
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        padding: 16px;
+      }
+
+      .stage header {
+        display: flex;
+        justify-content: space-between;
+      }
+
+      pre {
+        background: #f6f8fa;
+        overflow: auto;
+        padding: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>AI Engineering Tool</h1>
+      <p>Independent workflow tool operating on the Conduit monorepo through git-managed runs.</p>
+
+      <section>
+        <h2>PM Requirement</h2>
+        <textarea id="requirement">文章详情页新增字数统计：在文章正文下方显示“本文共 XXX 字，预计阅读 X 分钟”，前端基于 Article.body 计算。</textarea>
+        <button id="run">Run workflow</button>
+      </section>
+
+      <section>
+        <h2>Result</h2>
+        <div id="result"></div>
+      </section>
+    </main>
+
+    <script>
+      const runButton = document.getElementById("run");
+      const requirement = document.getElementById("requirement");
+      const result = document.getElementById("result");
+
+      function renderRun(run) {
+        result.innerHTML = `
+          <p><strong>Run:</strong> ${run.runId}</p>
+          <p><strong>Status:</strong> ${run.status}</p>
+          <p><strong>Worktree:</strong> ${run.gitWorktree.path}</p>
+          <p><strong>Branch:</strong> ${run.gitWorktree.branch}</p>
+          <div class="grid">
+            ${run.stages
+              .map(
+                (stage) => `
+                  <article class="stage">
+                    <header>
+                      <strong>${stage.name}</strong>
+                      <span>${stage.status}</span>
+                    </header>
+                    <p>${stage.summary}</p>
+                    <pre>${JSON.stringify(stage.data, null, 2)}</pre>
+                  </article>
+                `,
+              )
+              .join("")}
+          </div>
+          <h3>Artifacts</h3>
+          <pre>${JSON.stringify(run.artifacts, null, 2)}</pre>
+        `;
+      }
+
+      runButton.addEventListener("click", async () => {
+        runButton.disabled = true;
+        result.textContent = "Running...";
+
+        try {
+          const response = await fetch("/api/workflows", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ requirement: requirement.value }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "Workflow failed");
+          renderRun(payload);
+        } catch (error) {
+          result.innerHTML = `<pre>${error.message}</pre>`;
+        } finally {
+          runButton.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
+

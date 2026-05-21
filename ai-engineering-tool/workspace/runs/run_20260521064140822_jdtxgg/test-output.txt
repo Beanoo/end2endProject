@@ -1,0 +1,6 @@
+
+> conduit-realworld-example-app@1.0.0 test
+> vitest
+
+
+sh: vitest: command not found

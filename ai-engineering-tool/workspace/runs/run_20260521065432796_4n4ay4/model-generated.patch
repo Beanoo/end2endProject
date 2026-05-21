@@ -1,0 +1,76 @@
+diff --git a/frontend/src/helpers/articleStats.js b/frontend/src/helpers/articleStats.js
+new file mode 100644
+index 0000000..d2a7f93
+--- /dev/null
++++ b/frontend/src/helpers/articleStats.js
+@@ -0,0 +1,15 @@
++export const getArticleStats = (body = '') => {
++  // 清理基础Markdown格式标记
++  const cleanedContent = body
++    .replace(/[#*`_~>\[\]()!-]/g, '')
++    .replace(/\s+/g, ' ')
++    .trim();
++
++  // 统计中文字符数 + 英文单词数
++  const chineseCharCount = (cleanedContent.match(/[\u4e00-\u9fa5]/g) || []).length;
++  const englishWordCount = (cleanedContent.match(/[a-zA-Z]+/g) || []).length;
++  const totalWordCount = chineseCharCount + englishWordCount;
++
++  // 按每分钟200字/词计算阅读时长，最少1分钟
++  const estimatedReadingMinutes = totalWordCount <= 0 ? 1 : Math.ceil(totalWordCount / 200);
++  return { wordCount: totalWordCount, readingTimeMinutes: estimatedReadingMinutes };
++};
+diff --git a/frontend/src/helpers/articleStats.test.js b/frontend/src/helpers/articleStats.test.js
+new file mode 100644
+index 0000000..7c2a61e
+--- /dev/null
++++ b/frontend/src/helpers/articleStats.test.js
+@@ -0,0 +1,22 @@
++import { getArticleStats } from './articleStats';
++
++describe('getArticleStats utility', () => {
++  it('returns default valid stats for empty input', () => {
++    expect(getArticleStats('')).toEqual({ wordCount: 0, readingTimeMinutes: 1 });
++  });
++
++  it('correctly counts Chinese characters', () => {
++    const testBody = '这是一段用于测试的中文内容';
++    expect(getArticleStats(testBody).wordCount).toBe(11);
++  });
++
++  it('correctly counts English words', () => {
++    const testBody = 'Hello world test article stats calculation';
++    expect(getArticleStats(testBody).wordCount).toBe(6);
++  });
++
++  it('calculates reading time correctly', () => {
++    const longBody = '测'.repeat(400);
++    expect(getArticleStats(longBody).readingTimeMinutes).toBe(2);
++  });
++});
+diff --git a/frontend/src/routes/Article/Article.jsx b/frontend/src/routes/Article/Article.jsx
+index 2a7d3f9..f8d7c2a 100644
+--- a/frontend/src/routes/Article/Article.jsx
++++ b/frontend/src/routes/Article/Article.jsx
+@@ -7,6 +7,7 @@ import ArticleTags from "../../components/ArticleTags";
+ import BannerContainer from "../../components/BannerContainer";
+ import { useAuth } from "../../context/AuthContext";
+ import getArticle from "../../services/getArticle";
++import { getArticleStats } from "../../helpers/articleStats";
+ 
+ function Article() {
+   const { state } = useLocation();
+@@ -37,6 +38,12 @@ function Article() {
+       <div className="container page">
+         <div className="row article-content">
+           <div className="col-md-12">
+-            {body && <Markdown options={{ forceBlock: true }}>{body}</Markdown>}
++            {body && <Markdown options={{ forceBlock: true }}>{body}</Markdown>}
++            {body && (() => {
++              const { wordCount, readingTimeMinutes } = getArticleStats(body);
++              return <p className="text-muted small mt-3 mb-3">本文共 {wordCount} 字，预计阅读 {readingTimeMinutes} 分钟</p>;
++            })()}
++            <hr className="my-2" />
+             <ArticleTags tagList={tagList} />
+           </div>
+         </div>

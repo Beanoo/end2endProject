@@ -1,0 +1,13 @@
+
+> frontend@0.1.0 build
+> vite build
+
+
+sh: vite: command not found
+npm error Lifecycle script `build` failed with error:
+npm error code 127
+npm error path /Users/doumengyao/work/end2endProject/ai-engineering-tool/workspace/worktrees/run_20260521064140822_jdtxgg/frontend
+npm error workspace frontend@0.1.0
+npm error location /Users/doumengyao/work/end2endProject/ai-engineering-tool/workspace/worktrees/run_20260521064140822_jdtxgg/frontend
+npm error command failed
+npm error command sh -c vite build

@@ -1,0 +1,66 @@
+diff --git a/frontend/src/helpers/articleStats.js b/frontend/src/helpers/articleStats.js
+new file mode 100644
+index 0000000..8a7d2c5
+--- /dev/null
++++ b/frontend/src/helpers/articleStats.js
+@@ -0,0 +1,13 @@
++export default function getArticleStats(body) {
++  if (!body) return { totalWords: 0, readingMinutes: 0 };
++  // 清理markdown特殊标记后统计有效字符数
++  const plainText = body
++    .replace(/[#*`\[\]()\-!>]/g, '')
++    .replace(/\s+/g, ' ')
++    .trim();
++  const totalWords = plainText.length;
++  // 按平均每分钟300字阅读速度计算，最低阅读时长为1分钟
++  const readingMinutes = totalWords === 0 ? 0 : Math.max(1, Math.ceil(totalWords / 300));
++  return { totalWords, readingMinutes };
++}
+diff --git a/frontend/src/helpers/articleStats.test.js b/frontend/src/helpers/articleStats.test.js
+new file mode 100644
+index 0000000..2e7f9d3
+--- /dev/null
++++ b/frontend/src/helpers/articleStats.test.js
+@@ -0,0 +1,18 @@
++import getArticleStats from './articleStats';
++
++describe('getArticleStats utility', () => {
++  it('returns zero stats for empty/non-existent body', () => {
++    expect(getArticleStats('')).toEqual({ totalWords: 0, readingMinutes: 0 });
++    expect(getArticleStats(null)).toEqual({ totalWords: 0, readingMinutes: 0 });
++    expect(getArticleStats(undefined)).toEqual({ totalWords: 0, readingMinutes: 0 });
++  });
++
++  it('returns 1 minute reading time for short content', () => {
++    const shortBody = '这是一段测试用的短文章内容';
++    const result = getArticleStats(shortBody);
++    expect(result.totalWords).toBe(11);
++    expect(result.readingMinutes).toBe(1);
++  });
++
++  it('calculates correct reading time for 600+ character content', () => {
++    const longBody = '测'.repeat(650);
++    expect(getArticleStats(longBody).readingMinutes).toBe(3);
++  });
++});
+diff --git a/frontend/src/routes/Article/Article.jsx b/frontend/src/routes/Article/Article.jsx
+index 7a9f8d2..c8d7f32 100644
+--- a/frontend/src/routes/Article/Article.jsx
++++ b/frontend/src/routes/Article/Article.jsx
+@@ -8,6 +8,7 @@ import { useAuth } from "../../context/AuthContext";
+ import getArticle from "../../services/getArticle";
++import getArticleStats from "../../helpers/articleStats";
+ 
+ function Article() {
+   const { state } = useLocation();
+@@ -41,6 +42,11 @@ function Article() {
+         <div className="col-md-12">
+           {body && <Markdown options={{ forceBlock: true }}>{body}</Markdown>}
++          {body && (
++            <p className="text-muted mt-3 mb-2">
++              本文共 {getArticleStats(body).totalWords} 字，预计阅读 {getArticleStats(body).readingMinutes} 分钟
++            </p>
++          )}
+           <ArticleTags tagList={tagList} />
+         </div>
+       </div>

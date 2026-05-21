@@ -1,0 +1,29 @@
+{
+  "runId": "run_20260521062025132_p5l65d",
+  "status": "failed",
+  "startedAt": "2026-05-21T06:20:25.134Z",
+  "completedAt": "2026-05-21T06:20:25.553Z",
+  "targetRepo": "/Users/doumengyao/work/end2endProject/conduit-realworld-example-app-filtered",
+  "repoStatus": {
+    "branch": "main",
+    "gitDir": ".git",
+    "head": "d9500b503cfdf17394cb1091d33684b22d44c5d7",
+    "isDirty": true,
+    "root": "/Users/doumengyao/work/end2endProject/conduit-realworld-example-app-filtered",
+    "status": [
+      "M backend/config/config.js",
+      " M package-lock.json",
+      " M package.json",
+      "?? docs/"
+    ]
+  },
+  "error": {
+    "message": "The API key doesn't exist. Request id: 02177934442560206a9ddacc34765855f5d3132a5b7606ac1c35c",
+    "status": 502
+  },
+  "artifacts": {
+    "events": "workspace/runs/run_20260521062025132_p5l65d/events.jsonl",
+    "result": "workspace/runs/run_20260521062025132_p5l65d/result.json",
+    "knowledge": "workspace/runs/run_20260521062025132_p5l65d/knowledge-draft.json"
+  }
+}

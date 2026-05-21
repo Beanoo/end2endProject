@@ -1,0 +1,33 @@
+diff --git a/frontend/src/routes/Article/Article.jsx b/frontend/src/routes/Article/Article.jsx
+index c47becf..d8a58d7 100644
+--- a/frontend/src/routes/Article/Article.jsx
++++ b/frontend/src/routes/Article/Article.jsx
+@@ -7,6 +7,7 @@ import ArticleTags from "../../components/ArticleTags";
+ import BannerContainer from "../../components/BannerContainer";
+ import { useAuth } from "../../context/AuthContext";
+ import getArticle from "../../services/getArticle";
++import { getArticleStats } from "../../helpers/articleStats";
+ 
+ function Article() {
+   const { state } = useLocation();
+@@ -15,6 +16,7 @@ function Article() {
+   const { headers, isAuth } = useAuth();
+   const navigate = useNavigate();
+   const { slug } = useParams();
++  const articleStats = getArticleStats(body);
+ 
+   useEffect(() => {
+     if (state) return;
+@@ -40,6 +42,12 @@ function Article() {
+         <div className="row article-content">
+           <div className="col-md-12">
+             {body && <Markdown options={{ forceBlock: true }}>{body}</Markdown>}
++            {body && (
++              <p className="text-muted">
++                本文共 {articleStats.wordCount} 字，预计阅读{" "}
++                {articleStats.readingMinutes} 分钟
++              </p>
++            )}
+             <ArticleTags tagList={tagList} />
+           </div>
+         </div>

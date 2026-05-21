@@ -1,0 +1,29 @@
+{
+  "runId": "run_20260521062817001_2y30m9",
+  "status": "failed",
+  "startedAt": "2026-05-21T06:28:17.002Z",
+  "completedAt": "2026-05-21T06:29:39.475Z",
+  "targetRepo": "/Users/doumengyao/work/end2endProject/conduit-realworld-example-app-filtered",
+  "repoStatus": {
+    "branch": "main",
+    "gitDir": ".git",
+    "head": "d9500b503cfdf17394cb1091d33684b22d44c5d7",
+    "isDirty": true,
+    "root": "/Users/doumengyao/work/end2endProject/conduit-realworld-example-app-filtered",
+    "status": [
+      "M backend/config/config.js",
+      " M package-lock.json",
+      " M package.json",
+      "?? docs/"
+    ]
+  },
+  "error": {
+    "message": "Command failed: git apply --whitespace=fix -\nerror: corrupt patch at line 10\n",
+    "status": 128
+  },
+  "artifacts": {
+    "events": "workspace/runs/run_20260521062817001_2y30m9/events.jsonl",
+    "result": "workspace/runs/run_20260521062817001_2y30m9/result.json",
+    "knowledge": "workspace/runs/run_20260521062817001_2y30m9/knowledge-draft.json"
+  }
+}

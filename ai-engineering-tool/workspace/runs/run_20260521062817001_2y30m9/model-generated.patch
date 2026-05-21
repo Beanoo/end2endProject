@@ -1,0 +1,59 @@
+--- a/frontend/src/routes/Article/Article.jsx
++++ b/frontend/src/routes/Article/Article.jsx
+@@ -8,6 +8,7 @@ import BannerContainer from "../../components/BannerContainer";
+ import { useAuth } from "../../context/AuthContext";
+ import getArticle from "../../services/getArticle";
++import { getArticleStats } from "../../helpers/articleStats";
+ 
+ function Article() {
+   const { state } = useLocation();
+@@ -40,6 +41,11 @@ function Article() {
+         <div className="row article-content">
+           <div className="col-md-12">
+             {body && <Markdown options={{ forceBlock: true }}>{body}</Markdown>}
++            {body && (
++              <p className="text-muted mt-3 mb-3">
++                本文共 {getArticleStats(body).wordCount} 字，预计阅读 {getArticleStats(body).readingMinutes} 分钟
++              </p>
++            )}
+             <ArticleTags tagList={tagList} />
+           </div>
+         </div>
+--- /dev/null
++++ b/frontend/src/helpers/articleStats.js
+@@ -0,0 +1,12 @@
++export function getArticleStats(body) {
++  if (!body || typeof body !== 'string') {
++    return { wordCount: 0, readingMinutes: 0 };
++  }
++  const wordCount = body.replace(/\s/g, '').length;
++  const readingMinutes = wordCount > 0 ? Math.max(1, Math.ceil(wordCount / 200)) : 0;
++  return {
++    wordCount,
++    readingMinutes,
++  };
++}
+--- /dev/null
++++ b/frontend/src/helpers/articleStats.test.js
+@@ -0,0 +1,22 @@
++import { getArticleStats } from './articleStats';
++
++describe('getArticleStats', () => {
++  it('returns zero stats for invalid/empty input', () => {
++    expect(getArticleStats('')).toEqual({ wordCount: 0, readingMinutes: 0 });
++    expect(getArticleStats(null)).toEqual({ wordCount: 0, readingMinutes: 0 });
++    expect(getArticleStats(undefined)).toEqual({ wordCount: 0, readingMinutes: 0 });
++  });
++
++  it('calculates correct total word count excluding whitespace', () => {
++    const testBody = 'Hello world\n 中文测试内容';
++    expect(getArticleStats(testBody).wordCount).toBe(12);
++  });
++
++  it('calculates expected reading minutes correctly (200 chars per minute)', () => {
++    expect(getArticleStats('a'.repeat(100)).readingMinutes).toBe(1);
++    expect(getArticleStats('a'.repeat(250)).readingMinutes).toBe(2);
++    expect(getArticleStats('a'.repeat(400)).readingMinutes).toBe(2);
++    expect(getArticleStats('a'.repeat(401)).readingMinutes).toBe(3);
++  });
++});
