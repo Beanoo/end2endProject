@@ -2,9 +2,7 @@ const path = require("path");
 
 const projectRoot = path.resolve(__dirname, "..");
 const defaultTargetRepo = path.resolve(
-  projectRoot,
-  "..",
-  "conduit-realworld-example-app-filtered",
+  process.env.TARGET_REPO || path.join(projectRoot, "..", "..", "Conduiteg"),
 );
 
 module.exports = {
@@ -13,4 +11,3 @@ module.exports = {
   projectRoot,
   workspaceRoot: path.join(projectRoot, "workspace"),
 };
-

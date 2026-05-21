@@ -214,7 +214,21 @@ worktree
 通用人工验收建议
 ```
 
-由于当前 Conduit 已作为普通目录提交到总仓库，workflow 会区分：
+workflow 支持两种目标仓库形态：
+
+```text
+1. Conduit 是独立 Git 仓库。
+2. Conduit 是某个 Git 仓库里的子目录。
+```
+
+当前推荐和默认形态是独立 Git 仓库：
+
+```text
+/Users/doumengyao/work/Conduiteg
+git@github.com:Beanoo/Conduiteg.git
+```
+
+工具会区分：
 
 ```text
 gitWorktree.path: Git worktree 根目录
@@ -222,7 +236,9 @@ gitWorktree.targetPath: worktree 内的 Conduit 目录
 gitWorktree.targetRelativePath: Conduit 相对 Git 根目录的路径
 ```
 
-源码索引、测试、构建在 `targetPath` 内执行；patch 应用和 diff 保存通过 `targetRelativePath` 限定到 Conduit 子目录。
+当目标是独立 Git 仓库时，`targetPath` 等于 `gitWorktree.path`，`targetRelativePath` 为 `.`。
+
+源码索引、测试、构建在 `targetPath` 内执行；patch 应用和 diff 保存通过 `targetRelativePath` 限定目标范围。
 
 ## 9. 当前能力边界
 

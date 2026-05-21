@@ -1,0 +1,13 @@
+diff --git a/frontend/src/components/PopularTags/PopularTags.jsx b/frontend/src/components/PopularTags/PopularTags.jsx
+index 8a7d2f1..c8d7f3a 100644
+--- a/frontend/src/components/PopularTags/PopularTags.jsx
++++ b/frontend/src/components/PopularTags/PopularTags.jsx
+@@ -24,6 +24,6 @@ function PopularTags() {
+             <TagButton tagsList={tags} />
+           ) : loading ? (
+             <p>Loading tags...</p>
+           ) : (
+-            <p>Tags list not available</p>
++            <p className="text-muted">暂无标签</p>
+           )}
+         </div>

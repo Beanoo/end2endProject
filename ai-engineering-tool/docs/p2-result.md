@@ -58,7 +58,7 @@ src/verification.js
 
 ## 关键工程修复
 
-Conduit 的 `.git` 已经移除，现在它是总仓库 `end2endProject` 下的普通目录：
+P2 验证时 Conduit 仍是总仓库 `end2endProject` 下的普通目录：
 
 ```text
 conduit-realworld-example-app-filtered
@@ -81,6 +81,28 @@ gitWorktree.targetPath
 ```
 
 patch 应用和 diff 保存发生在 Git worktree 根目录，并通过 `targetRelativePath` 限定到 Conduit 子目录。
+
+后续已进一步拆分为独立仓库：
+
+```text
+/Users/doumengyao/work/Conduiteg
+git@github.com:Beanoo/Conduiteg.git
+```
+
+AI 工程工具默认目标仓库已改为独立 Conduit 仓库，并可通过环境变量覆盖：
+
+```text
+TARGET_REPO=/path/to/conduit
+```
+
+迁移后已重新运行一次端到端 workflow：
+
+```text
+runId: run_20260521142246741_97ix7p
+targetRepo: /Users/doumengyao/work/Conduiteg
+targetRelativePath: .
+status: completed_with_gates
+```
 
 ## 成功验证
 
