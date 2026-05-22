@@ -1,0 +1,1 @@
+error: patch fragment without header at line 23: @@ -6,6 +6,11 @@ function AuthPageContainer({ error, path, text, title, children }) {

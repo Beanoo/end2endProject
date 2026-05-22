@@ -1,0 +1,20 @@
+--- a/frontend/src/routes/Login.jsx
++++ b/frontend/src/routes/Login.jsx
+@@ -7,6 +7,7 @@ import LoginForm from "../components/LoginForm";
+ function Login() {
+   return (
+     <div className="auth-page">
+       <ContainerRow type="page">
+         <div className="col-md-6 offset-md-3 col-xs-12">
+           <h1 className="text-xs-center">Sign in</h1>
++          <p className="text-xs-center text-muted" style={{ margin: "0.5rem 0 1rem" }}>欢迎回到 Conduit</p>
+           <p className="text-xs-center">
+             <Link to="/register">Need an account?</Link>
+           </p>
+           <LoginForm />
+         </div>
+       </ContainerRow>
+     </div>
+   );
+ }
+ export default Login;

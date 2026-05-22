@@ -35,10 +35,53 @@ function stripFence(text) {
     .trim();
 }
 
+function normalizeUnifiedDiff(patch) {
+  const trimmed = stripFence(patch);
+  const lines = trimmed.split("\n");
+  const normalized = [];
+  let i = 0;
+  let pendingDiffHeader = null;
+
+  while (i < lines.length) {
+    const diffHeader = lines[i]?.match(/^diff --git\s+a\/(.+)\s+b\/(.+)$/);
+    if (diffHeader) {
+      pendingDiffHeader = lines[i];
+      i += 1;
+      continue;
+    }
+
+    if (/^index\s+/.test(lines[i] || "")) {
+      i += 1;
+      continue;
+    }
+
+    const oldFile = lines[i]?.match(/^---\s+(?:a\/)?(.+)$/);
+    const newFile = lines[i + 1]?.match(/^\+\+\+\s+(?:b\/)?(.+)$/);
+    if (oldFile && newFile) {
+      const oldPath = oldFile[1].trim();
+      const newPath = newFile[1].trim();
+      normalized.push(pendingDiffHeader || `diff --git a/${oldPath} b/${newPath}`);
+      normalized.push(`--- a/${oldPath}`);
+      normalized.push(`+++ b/${newPath}`);
+      pendingDiffHeader = null;
+      i += 2;
+      continue;
+    }
+    if (pendingDiffHeader) {
+      normalized.push(pendingDiffHeader);
+      pendingDiffHeader = null;
+    }
+    normalized.push(lines[i]);
+    i += 1;
+  }
+
+  return normalized.join("\n").trimEnd() + "\n";
+}
+
 function normalizePatchPath(rawPath) {
   const rawFile = String(rawPath || "").split(/\s+/)[0];
   if (rawFile === "/dev/null" || rawFile === "dev/null") return rawFile;
-  return rawFile.replace(/^a\//, "").replace(/^b\//, "").replace(/^\.\//, "");
+  return rawFile.replace(/^a\//, "").replace(/^b\//, "").replace(/^\.\//, "").trim();
 }
 
 function isBlocked(file) {
@@ -96,6 +139,45 @@ function applyPatch({ gitRootPath, targetRelativePath, patch }) {
   });
 }
 
+function applyPatchWithFallbacks({ gitRootPath, targetRelativePath, patch }) {
+  try {
+    applyPatch({ gitRootPath, targetRelativePath, patch });
+    return "git_apply";
+  } catch (firstError) {
+    const recountArgs = ["apply", "--whitespace=fix", "--recount"];
+    if (targetRelativePath) {
+      recountArgs.push(`--directory=${targetRelativePath}`);
+    }
+    recountArgs.push("-");
+
+    try {
+      execFileSync("git", recountArgs, {
+        cwd: gitRootPath,
+        input: patch,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      return "git_apply_recount";
+    } catch {
+      const zeroArgs = ["apply", "--whitespace=fix", "--unidiff-zero"];
+      if (targetRelativePath) {
+        zeroArgs.push(`--directory=${targetRelativePath}`);
+      }
+      zeroArgs.push("-");
+
+      try {
+        execFileSync("git", zeroArgs, {
+          cwd: gitRootPath,
+          input: patch,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        return "git_apply_unidiff_zero";
+      } catch {
+        throw firstError;
+      }
+    }
+  }
+}
+
 function getRequirementText(requirementStage) {
   const data = requirementStage?.data || {};
   return [
@@ -107,6 +189,23 @@ function getRequirementText(requirementStage) {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function isSmallUiCopyRequirement(requirementText) {
+  const text = String(requirementText || "").toLowerCase();
+  const copySignals = ["文案", "标题", "辅助", "提示", "显示", "展示", "label", "text", "copy"];
+  const structuralSignals = ["接口", "数据库", "权限", "认证", "新增页面", "schema", "api", "migration"];
+  return copySignals.some((term) => text.includes(term)) && !structuralSignals.some((term) => text.includes(term));
+}
+
+function buildTaskHint(requirementText, moduleStage) {
+  if (!isSmallUiCopyRequirement(requirementText)) return "无特殊提示。";
+  const boundary = moduleStage?.data?.editBoundary || [];
+  return [
+    "这是一个小型 UI 文案需求。",
+    "必须优先在已允许的页面/组件文件内直接完成，不要为了复用而修改共享容器组件。",
+    `本次只能改这些文件：${boundary.join(", ")}`,
+  ].join("\n");
 }
 
 function buildFileContext(worktreePath, moduleStage) {
@@ -141,6 +240,10 @@ async function askForPatch({ runDir, purpose, requirementText, planStage, module
         "",
         "错误信息:",
         previous.error,
+        "",
+        "修复要求：",
+        "如果上一次 patch 触碰了不允许文件，本次必须完全移除这些文件的 diff。",
+        "本次输出只能包含上面“可修改的既有文件”和允许新增目录内的文件。",
       ].join("\n")
     : "";
 
@@ -148,9 +251,13 @@ async function askForPatch({ runDir, purpose, requirementText, planStage, module
     "你是一个严谨的代码生成 Agent，目标仓库是 Conduit/RealWorld 全栈博客 monorepo。",
     "请根据 PM 需求生成最小可行的 unified diff patch。",
     "只输出可被 git apply 应用的 unified diff，不要解释，不要 markdown。",
+    "diff 必须包含标准文件头，例如：diff --git a/path b/path、--- a/path、+++ b/path、@@ hunk header。",
     "",
     "PM 需求和澄清结果：",
     requirementText,
+    "",
+    "任务提示：",
+    buildTaskHint(requirementText, moduleStage),
     "",
     "方案约束：",
     JSON.stringify(planStage?.data || {}, null, 2),
@@ -214,22 +321,24 @@ async function generateAndApplyPatch({
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const patchFile = attempt === 0 ? "model-generated.patch" : `model-repaired-${attempt}.patch`;
-    const patch = await askForPatch({
-      runDir,
-      purpose: attempt === 0 ? "code_patch_generation" : `code_patch_repair_${attempt}`,
-      requirementText,
-      planStage,
-      moduleStage,
-      fileContext,
-      previous,
-    });
+    const patch = normalizeUnifiedDiff(
+      await askForPatch({
+        runDir,
+        purpose: attempt === 0 ? "code_patch_generation" : `code_patch_repair_${attempt}`,
+        requirementText,
+        planStage,
+        moduleStage,
+        fileContext,
+        previous,
+      }),
+    );
     savePatch(runDir, patchFile, patch);
 
     try {
       touchedFiles = validatePatch(patch, boundary);
-      applyPatch({ gitRootPath, targetRelativePath, patch });
+      const applyMethod = applyPatchWithFallbacks({ gitRootPath, targetRelativePath, patch });
       appliedBy = attempt === 0 ? "model_patch" : `model_patch_repair_${attempt}`;
-      attempts.push({ patchFile, status: "applied", touchedFiles });
+      attempts.push({ patchFile, status: "applied", touchedFiles, applyMethod });
       break;
     } catch (error) {
       const errorText = String(error.stderr || error.message);

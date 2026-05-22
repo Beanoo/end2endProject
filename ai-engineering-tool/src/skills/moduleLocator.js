@@ -51,6 +51,25 @@ function fallbackBoundary(index) {
   };
 }
 
+function isSmallUiCopyRequirement(requirementText) {
+  const text = String(requirementText || "").toLowerCase();
+  const copySignals = ["文案", "标题", "辅助", "提示", "显示", "展示", "label", "text", "copy"];
+  const structuralSignals = ["接口", "数据库", "权限", "认证", "新增页面", "schema", "api", "migration"];
+  return copySignals.some((term) => text.includes(term)) && !structuralSignals.some((term) => text.includes(term));
+}
+
+function rankBoundaryByIndex(files, index) {
+  const scoreByFile = new Map(index.files.map((item) => [item.file, item.score]));
+  return [...files].sort((a, b) => (scoreByFile.get(b) || 0) - (scoreByFile.get(a) || 0) || a.localeCompare(b));
+}
+
+function constrainEditBoundary({ editBoundary, index, requirementText }) {
+  if (!isSmallUiCopyRequirement(requirementText)) return editBoundary;
+  const frontendOnly = editBoundary.filter((file) => file.startsWith("frontend/src/"));
+  const candidates = frontendOnly.length > 0 ? frontendOnly : editBoundary;
+  return rankBoundaryByIndex(candidates, index).slice(0, 2);
+}
+
 async function locateModules(worktreePath, { requirementStage, runDir }) {
   const requirementText = [
     requirementStage?.data?.title,
@@ -109,7 +128,12 @@ async function locateModules(worktreePath, { requirementStage, runDir }) {
   const fallback = fallbackBoundary(index);
   const editBoundary = normalizeFiles(worktreePath, modelDecision?.editBoundary, sourceFileSet);
   const readOnlyFiles = normalizeFiles(worktreePath, modelDecision?.readOnlyFiles, sourceFileSet);
-  const finalEditBoundary = editBoundary.length > 0 ? editBoundary : fallback.editBoundary;
+  const unconstrainedBoundary = editBoundary.length > 0 ? editBoundary : fallback.editBoundary;
+  const finalEditBoundary = constrainEditBoundary({
+    editBoundary: unconstrainedBoundary,
+    index,
+    requirementText,
+  });
   const relatedTests = existingTestsFor(finalEditBoundary, allFiles);
   const files = [...new Set([...finalEditBoundary, ...readOnlyFiles, ...relatedTests])]
     .map((file) => ({
@@ -133,6 +157,7 @@ async function locateModules(worktreePath, { requirementStage, runDir }) {
       allowedNewFilePrefixes,
       noEditAreas: modelDecision?.noEditAreas || fallback.noEditAreas,
       rationale: modelDecision?.rationale || fallback.rationale,
+      unconstrainedEditBoundary: unconstrainedBoundary,
       locatedBy: modelDecision?.modelError ? "heuristic_after_model_failure" : "model_with_index",
     },
   };

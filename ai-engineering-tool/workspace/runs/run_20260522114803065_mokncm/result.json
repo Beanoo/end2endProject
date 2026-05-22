@@ -1,0 +1,25 @@
+{
+  "runId": "run_20260522114803065_mokncm",
+  "status": "failed",
+  "requirement": "登录页标题下方增加一句辅助文案：欢迎回到 Conduit",
+  "startedAt": "2026-05-22T11:48:03.068Z",
+  "completedAt": "2026-05-22T11:49:28.922Z",
+  "targetRepo": "/Users/doumengyao/work/Conduiteg",
+  "repoStatus": {
+    "branch": "main",
+    "gitDir": ".git",
+    "head": "5d315829f12bd18f60523252368fefd2b95dfce9",
+    "isDirty": false,
+    "root": "/Users/doumengyao/work/Conduiteg",
+    "status": []
+  },
+  "error": {
+    "message": "Model patch could not be applied after repair attempts",
+    "status": 422
+  },
+  "artifacts": {
+    "events": "workspace/runs/run_20260522114803065_mokncm/events.jsonl",
+    "result": "workspace/runs/run_20260522114803065_mokncm/result.json",
+    "knowledge": "workspace/runs/run_20260522114803065_mokncm/knowledge-draft.json"
+  }
+}

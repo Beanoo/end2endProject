@@ -1,0 +1,10 @@
+--- a/frontend/src/routes/Login.jsx
++++ b/frontend/src/routes/Login.jsx
+@@ -22,6 +22,7 @@ function Login() {
+         <div className="row">
+           <div className="col-md-6 offset-md-3 col-xs-12">
+             <h1 className="text-xs-center">Sign in</h1>
++            <p className="text-xs-center text-muted mt-1 mb-3">欢迎回到 Conduit</p>
+             <p className="text-xs-center">
+               <Link to="/register">Need an account?</Link>
+             </p>

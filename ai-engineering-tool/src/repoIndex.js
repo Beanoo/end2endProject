@@ -39,7 +39,7 @@ const domainHints = [
   {
     name: "auth",
     terms: ["login", "sign up", "signup", "register", "登录", "注册", "认证", "密码"],
-    paths: ["Login", "SignUp", "Auth", "user", "users", "authentication", "jwt"],
+    paths: ["Login", "SignUp", "AuthPageContainer", "LoginForm", "SignUpForm", "user", "users", "authentication", "jwt"],
   },
   {
     name: "settings",
@@ -144,6 +144,20 @@ function scoreFile({ file, content, terms, matchedDomains }) {
   if (file.includes("/components/")) score += 2;
   if (file.includes("/controllers/") || file.includes("/routes/")) score += 2;
   if (file.endsWith(".test.js") || file.endsWith(".test.jsx")) score -= 2;
+  if (
+    matchedDomains.some((domain) => domain.name === "auth") &&
+    terms.some((term) => ["登录", "login", "sign", "signin"].includes(term)) &&
+    file === "frontend/src/routes/Login.jsx"
+  ) {
+    score += 30;
+  }
+  if (
+    matchedDomains.some((domain) => domain.name === "auth") &&
+    terms.some((term) => ["注册", "signup", "register"].includes(term)) &&
+    file === "frontend/src/routes/SignUp.jsx"
+  ) {
+    score += 30;
+  }
 
   return score;
 }

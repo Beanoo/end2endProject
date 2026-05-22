@@ -1,0 +1,14 @@
+{
+  "verdict": "pass",
+  "summary": "本次改动为AuthPageContainer组件新增可选subtitle属性，仅在登录页传入指定文案「欢迎回到 Conduit」渲染在主标题正下方，完全符合所有验收条件，无越界修改。",
+  "changedScope": [
+    "frontend/src/components/AuthPageContainer/AuthPageContainer.jsx",
+    "frontend/src/routes/Login.jsx"
+  ],
+  "estimatedImpact": "仅在登录页新增静态辅助展示文案，复用现有全局辅助文本样式，完全不改动原有登录、注册业务逻辑，注册页未传入subtitle属性不受任何影响，全响应式断点下展示正常。",
+  "risks": [],
+  "suggestions": [
+    "可补充登录页辅助文案展示效果的E2E测试用例，验证文案位置、内容正确性以及注册页无该文案展示"
+  ],
+  "requiredChanges": []
+}

@@ -1,0 +1,14 @@
+
+ RUN  v4.0.18 /Users/doumengyao/work/end2endProject/ai-engineering-tool/workspace/worktrees/run_20260522140334518_cylf1m
+
+ ✓ backend/helper/helpers.test.js (6 tests) 17ms
+ ✓ frontend/src/helpers/articleStats.test.js (3 tests) 19ms
+ ✓ frontend/src/helpers/errorHandler.test.js (5 tests) 89ms
+ ✓ frontend/src/helpers/dateFormatter.test.js (1 test) 414ms
+   ✓ should format an ISO string  411ms
+
+ Test Files  4 passed (4)
+      Tests  15 passed (15)
+   Start at  22:04:39
+   Duration  3.52s (transform 316ms, setup 0ms, import 468ms, tests 539ms, environment 9.81s)
+
