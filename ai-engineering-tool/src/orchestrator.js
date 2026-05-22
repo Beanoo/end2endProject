@@ -86,7 +86,7 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
     const testStage = completeStage(runDir, planTests({ moduleStage }));
     const verificationStage = completeStage(
       runDir,
-      runVerification({
+      await runVerification({
         worktreePath: worktreeTargetPath,
         gitRootPath: gitWorktree.path,
         targetRelativePath,

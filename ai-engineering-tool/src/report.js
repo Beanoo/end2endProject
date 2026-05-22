@@ -32,6 +32,7 @@ ${touchedFiles.map((file) => `- ${file}`).join("\n") || "- 未记录"}
 
 - 测试: ${verification?.data?.test?.status || "unknown"}
 - 构建: ${verification?.data?.build?.status || "unknown"}
+- 后端 smoke: ${verification?.data?.backendSmoke?.status || "unknown"}
 - diff: ${verification?.data?.diffFile || "changes.patch"}
 
 ## 验证命令
@@ -39,6 +40,7 @@ ${touchedFiles.map((file) => `- ${file}`).join("\n") || "- 未记录"}
 \`\`\`bash
 npm run test
 npm run build -w frontend
+PORT=3101 npm run dev -w backend
 \`\`\`
 
 ## 人工验收
