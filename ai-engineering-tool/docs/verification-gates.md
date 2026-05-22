@@ -27,7 +27,7 @@ Vite proxy 请求 /api/articles、/api/tags 时 ECONNREFUSED
 ```text
 1. 单元测试: ./node_modules/.bin/vitest --run
 2. 前端构建: npm run build -w frontend
-3. 后端 smoke: 临时启动 backend 并请求 /api/tags
+3. 后端 smoke: 临时启动 backend，先请求通用健康入口，再按模块边界请求安全 API
 ```
 
 只有三项都通过，workflow 才会标记为：
@@ -69,21 +69,37 @@ dependency-bootstrap.json
 PORT=3427 npm run dev -w backend
 ```
 
-然后请求：
+然后先请求通用健康入口：
 
 ```text
-GET /api/tags
+GET /
 ```
 
-期望后端能返回 200。成功时产物类似：
+这一步只验证后端进程能启动、Express 能监听端口、数据库初始化没有直接导致进程退出。
+
+随后根据本次模块定位结果动态追加安全 API smoke targets：
+
+```text
+tag 相关需求      -> GET /api/tags
+article 相关需求  -> GET /api/articles?limit=1&offset=0
+其他需求          -> 暂不强行猜测业务接口，只保留 GET /
+```
+
+这样不会把 `/api/tags` 硬编码成所有需求的唯一验证路径。
+
+期望所有 smoke targets 返回 2xx/3xx。成功时产物类似：
 
 ```json
 {
   "status": "passed",
   "health": {
     "statusCode": 200,
-    "body": "{\"tags\":[]}"
-  }
+    "body": "{\"status\":\"API is running on /api\"}"
+  },
+  "targets": [
+    { "name": "backend-root", "path": "/" },
+    { "name": "tags-index", "path": "/api/tags" }
+  ]
 }
 ```
 
@@ -108,6 +124,7 @@ targetRepo: /Users/doumengyao/work/Conduiteg
 test: passed
 build: passed
 backendSmoke: passed
+GET /: {"status":"API is running on /api"}
 GET /api/tags: {"tags":[]}
 ```
 
@@ -120,6 +137,8 @@ GET /api/tags: {"tags":[]}
 ```text
 1. Playwright 打开真实页面并检查 UI 文案。
 2. 前后端同时启动后的浏览器级验收。
-3. 测试失败后的模型修复循环。
-4. PR 前的人工确认节点。
+3. 由模型根据需求生成更细粒度 API smoke plan。
+4. 需要认证、slug、username 的接口参数准备。
+5. 测试失败后的模型修复循环。
+6. PR 前的人工确认节点。
 ```

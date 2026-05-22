@@ -92,6 +92,7 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
         targetRelativePath,
         targetRepo: target,
         runDir,
+        moduleStage,
       }),
     );
     const deliveryStage = completeStage(

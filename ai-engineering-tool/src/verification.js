@@ -78,7 +78,19 @@ function wait(ms) {
   });
 }
 
-async function waitForBackend({ url, child, timeoutMs }) {
+async function requestSmokeTarget({ baseUrl, target }) {
+  const response = await fetch(`${baseUrl}${target.path}`);
+  const body = await response.text();
+  return {
+    name: target.name,
+    path: target.path,
+    statusCode: response.status,
+    passed: response.status >= 200 && response.status < 400,
+    body: body.slice(0, 500),
+  };
+}
+
+async function waitForBackend({ baseUrl, child, timeoutMs }) {
   const started = Date.now();
   let lastError = "";
 
@@ -88,9 +100,12 @@ async function waitForBackend({ url, child, timeoutMs }) {
     }
 
     try {
-      const response = await fetch(url);
-      if (response.ok) return { statusCode: response.status, body: await response.text() };
-      lastError = `status=${response.status}`;
+      const response = await requestSmokeTarget({
+        baseUrl,
+        target: { name: "backend-root", path: "/" },
+      });
+      if (response.passed) return response;
+      lastError = `status=${response.statusCode}`;
     } catch (error) {
       lastError = error.message;
     }
@@ -99,6 +114,44 @@ async function waitForBackend({ url, child, timeoutMs }) {
   }
 
   throw new Error(`backend smoke timed out: ${lastError}`);
+}
+
+function hasAnyPath(moduleStage, patterns) {
+  const files = moduleStage?.data?.files || [];
+  const paths = [
+    ...(moduleStage?.data?.editBoundary || []),
+    ...(moduleStage?.data?.readOnlyFiles || []),
+    ...files.map((file) => file.path),
+  ];
+  return paths.some((file) => patterns.some((pattern) => pattern.test(file)));
+}
+
+function hasDomain(moduleStage, name) {
+  return (moduleStage?.data?.matchedDomains || []).some((domain) => domain.name === name);
+}
+
+function planBackendSmokeTargets(moduleStage) {
+  const targets = [{ name: "backend-root", path: "/" }];
+
+  if (
+    hasDomain(moduleStage, "tag") ||
+    hasAnyPath(moduleStage, [/backend\/routes\/tags\.js$/, /frontend\/src\/services\/getTags\.js$/])
+  ) {
+    targets.push({ name: "tags-index", path: "/api/tags" });
+  }
+
+  if (
+    hasDomain(moduleStage, "article") ||
+    hasAnyPath(moduleStage, [
+      /backend\/routes\/articles/,
+      /backend\/controllers\/articles\.js$/,
+      /frontend\/src\/services\/getArticles\.js$/,
+    ])
+  ) {
+    targets.push({ name: "articles-index", path: "/api/articles?limit=1&offset=0" });
+  }
+
+  return [...new Map(targets.map((target) => [target.path, target])).values()];
 }
 
 function stopProcess(child) {
@@ -114,8 +167,9 @@ function stopProcess(child) {
   }
 }
 
-async function runBackendSmoke({ worktreePath, runDir }) {
+async function runBackendSmoke({ worktreePath, runDir, moduleStage }) {
   const port = String(3101 + Math.floor(Math.random() * 700));
+  const targets = planBackendSmokeTargets(moduleStage);
   const output = [];
   const child = spawn("npm", ["run", "dev", "-w", "backend"], {
     cwd: worktreePath,
@@ -131,22 +185,34 @@ async function runBackendSmoke({ worktreePath, runDir }) {
   child.stderr.on("data", (chunk) => output.push(chunk.toString()));
 
   try {
+    const baseUrl = `http://localhost:${port}`;
     const health = await waitForBackend({
-      url: `http://localhost:${port}/api/tags`,
+      baseUrl,
       child,
       timeoutMs: 15000,
     });
+    const checks = [];
+    for (const target of targets) {
+      checks.push(await requestSmokeTarget({ baseUrl, target }));
+    }
+    const failed = checks.filter((check) => !check.passed);
+    if (failed.length > 0) {
+      throw new Error(`backend smoke target failed: ${failed.map((item) => item.path).join(", ")}`);
+    }
     return {
       command: `PORT=${port} npm run dev -w backend`,
       status: "passed",
       fileName: "backend-smoke-output.txt",
       health,
+      targets,
+      checks,
     };
   } catch (error) {
     return {
       command: `PORT=${port} npm run dev -w backend`,
       status: "failed",
       fileName: "backend-smoke-output.txt",
+      targets,
       error: error.message,
     };
   } finally {
@@ -175,6 +241,7 @@ async function runVerification({
   targetRelativePath = ".",
   targetRepo,
   runDir,
+  moduleStage,
 }) {
   const dependencies = ensureNodeModules({ worktreePath, targetRepo, runDir });
   const runtime = ensureLocalRuntimeFiles({ worktreePath, targetRepo, runDir });
@@ -203,7 +270,7 @@ async function runVerification({
     fileName: "build-output.txt",
     runDir,
   });
-  const backendSmoke = await runBackendSmoke({ worktreePath, runDir });
+  const backendSmoke = await runBackendSmoke({ worktreePath, runDir, moduleStage });
   const diff = saveDiff({ gitRootPath, targetRelativePath, runDir });
   const passed =
     test.status === "passed" && build.status === "passed" && backendSmoke.status === "passed";
