@@ -9,6 +9,7 @@ const planTests = require("./skills/testPlanner");
 const packageDelivery = require("./skills/deliveryPackager");
 const writeKnowledge = require("./skills/knowledgeWriter");
 const { generateAndApplyPatch } = require("./skills/patchGenerator");
+const { reviewGeneratedCode } = require("./skills/codeReviewer");
 const { runVerification } = require("./verification");
 const { writeDeliveryReport } = require("./report");
 
@@ -83,6 +84,37 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
         moduleStage,
       }),
     );
+    const reviewStage = completeStage(
+      runDir,
+      await reviewGeneratedCode({
+        runDir,
+        worktreePath: worktreeTargetPath,
+        gitRootPath: gitWorktree.path,
+        targetRelativePath,
+        requirementStage,
+        planStage,
+        moduleStage,
+        codeStage,
+      }),
+    );
+    if (reviewStage.data.verdict !== "pass") {
+      const result = {
+        runId,
+        status: "rejected_by_code_review",
+        requirement,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        targetRepo: target,
+        repoStatus,
+        gitWorktree,
+        stages: [requirementStage, planStage, moduleStage, codeStage, reviewStage],
+        artifacts,
+      };
+      writeJson(runDir, "result.json", result);
+      writeDeliveryReport({ runDir, result });
+      writeEvent(runDir, { type: "run_completed", runId, status: result.status });
+      return result;
+    }
     const testStage = completeStage(runDir, planTests({ moduleStage }));
     const verificationStage = completeStage(
       runDir,
@@ -97,7 +129,7 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
     );
     const deliveryStage = completeStage(
       runDir,
-      packageDelivery({ gitWorktree, moduleStage, planStage, requirementStage, codeStage }),
+      packageDelivery({ gitWorktree, moduleStage, planStage, requirementStage, codeStage, reviewStage }),
     );
     const knowledgeStage = completeStage(
       runDir,
@@ -118,6 +150,7 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
         planStage,
         moduleStage,
         codeStage,
+        reviewStage,
         testStage,
         verificationStage,
         deliveryStage,

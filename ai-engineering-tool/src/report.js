@@ -4,6 +4,7 @@ const path = require("path");
 function writeDeliveryReport({ runDir, result }) {
   const verification = result.stages.find((stage) => stage.name === "verification");
   const codeGeneration = result.stages.find((stage) => stage.name === "code_generation");
+  const codeReview = result.stages.find((stage) => stage.name === "code_review");
   const moduleLocation = result.stages.find((stage) => stage.name === "module_location");
   const touchedFiles = codeGeneration?.data?.touchedFiles || moduleLocation?.data?.editBoundary || [];
   const report = `# AI 工程工具提测说明
@@ -27,6 +28,14 @@ ${result.requirement || "未记录原始需求"}
 ## 变更文件
 
 ${touchedFiles.map((file) => `- ${file}`).join("\n") || "- 未记录"}
+
+## LLM Code Review
+
+- 结论: ${codeReview?.data?.verdict || "unknown"}
+- 摘要: ${codeReview?.data?.summary || ""}
+- 预估影响: ${codeReview?.data?.estimatedImpact || ""}
+- 风险点: ${(codeReview?.data?.risks || []).join("；") || "无"}
+- 建议修改方向: ${(codeReview?.data?.suggestions || []).join("；") || "无"}
 
 ## 验证结果
 
