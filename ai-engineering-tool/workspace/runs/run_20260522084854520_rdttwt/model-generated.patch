@@ -1,0 +1,13 @@
+--- a/frontend/src/components/PopularTags/PopularTags.jsx
++++ b/frontend/src/components/PopularTags/PopularTags.jsx
+@@ -23,7 +23,7 @@ function PopularTags() {
+           {tags.length > 0 ? (
+             <TagButton tagsList={tags} />
+           ) : loading ? (
+             <p>Loading tags...</p>
+           ) : (
+-            <p>Tags list not available</p>
++            <p className="text-center text-muted">暂无标签</p>
+           )}
+         </div>
+       </div>

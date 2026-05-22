@@ -1,0 +1,15 @@
+{
+  "pattern": "conduit dynamic requirement delivery",
+  "targetRepo": "/Users/doumengyao/work/Conduiteg",
+  "matchedDomains": [
+    "tag",
+    "feed"
+  ],
+  "reusableFiles": [
+    "frontend/src/components/PopularTags/PopularTags.jsx"
+  ],
+  "editBoundary": [
+    "frontend/src/components/PopularTags/PopularTags.jsx"
+  ],
+  "nextStep": "P2 should index this knowledge for future module-location retrieval."
+}

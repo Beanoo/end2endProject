@@ -1,0 +1,25 @@
+{
+  "runId": "run_20260522084554592_rcb5ai",
+  "status": "failed",
+  "requirement": "热门标签区域为空时显示占位文案：当接口返回空标签列表时，在首页右侧热门标签模块显示 暂无标签，而不是空白。",
+  "startedAt": "2026-05-22T08:45:54.593Z",
+  "completedAt": "2026-05-22T08:45:54.939Z",
+  "targetRepo": "/Users/doumengyao/work/Conduiteg",
+  "repoStatus": {
+    "branch": "main",
+    "gitDir": ".git",
+    "head": "5d315829f12bd18f60523252368fefd2b95dfce9",
+    "isDirty": false,
+    "root": "/Users/doumengyao/work/Conduiteg",
+    "status": []
+  },
+  "error": {
+    "message": "The API key doesn't exist. Request id: 02177943955493265b2cf176c77d5b1dd20ddbba02891826723d4",
+    "status": 502
+  },
+  "artifacts": {
+    "events": "workspace/runs/run_20260522084554592_rcb5ai/events.jsonl",
+    "result": "workspace/runs/run_20260522084554592_rcb5ai/result.json",
+    "knowledge": "workspace/runs/run_20260522084554592_rcb5ai/knowledge-draft.json"
+  }
+}
