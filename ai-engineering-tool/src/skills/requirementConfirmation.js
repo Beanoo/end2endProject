@@ -51,14 +51,28 @@ function buildConfirmationStage({ requirementStage, planStage, confirmationOverr
       },
       proposedScope: planStage?.data?.implementationSlices || [],
       assumptions,
+      questionsForUser: [
+        {
+          id: "acceptance_adjustments",
+          question: "这些验收标准是否准确？请补充必须保留或必须排除的行为。",
+        },
+        {
+          id: "open_questions",
+          question: "请回答开放问题中会影响实现范围的部分；不确定时写明按默认假设执行。",
+        },
+        {
+          id: "risk_tolerance",
+          question: "是否允许修改共享组件、错误类、路由等高影响模块？如不允许请写明边界。",
+        },
+      ],
       confirmationInstructions: {
-        api: "确认无误后重新 POST /api/workflows，并带上 confirmed:true。需要调整时可同时传 confirmationOverrides。",
+        api: "确认无误后 POST /api/workflows/:runId/confirm。用户输入会作为 confirmationOverrides 合并进需求澄清，并基于原需求继续生成。",
         exampleBody: {
-          requirement: data.title || "原始需求",
-          confirmed: true,
           confirmationOverrides: {
+            freeText: "可选：PM 对开放问题、边界和验收标准的自然语言补充",
             assumptions: ["可选：补充或覆盖关键假设"],
             acceptanceCriteria: ["可选：补充验收标准"],
+            outOfScope: ["可选：明确不做的范围"],
           },
         },
       },

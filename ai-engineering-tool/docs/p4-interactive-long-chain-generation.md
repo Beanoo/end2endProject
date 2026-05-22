@@ -41,20 +41,35 @@ flowchart TD
 - 结构化后的需求标题、用户故事、验收标准、开放问题。
 - 本次建议的 implementation slices。
 - 工具侧假设，例如只做 Conduit 增量改动、禁止修改环境文件和依赖锁文件。
-- 下一步 API 操作：重新 `POST /api/workflows`，携带 `confirmed:true`。
+- 给 PM 的确认问题：验收标准是否准确、开放问题如何回答、是否允许修改共享模块。
+- 下一步 API 操作：`POST /api/workflows/:runId/confirm`，携带用户输入的 `confirmationOverrides`。
 
 示例：
 
 ```json
 {
-  "requirement": "文章加封面图字段：Article 模型加 coverImage 字段，新建/编辑文章表单支持输入 URL，列表卡片和详情页展示封面图",
-  "confirmed": true,
   "confirmationOverrides": {
+    "freeText": "coverImage 可为空；只允许 http/https URL；暂不做本地上传；不要修改共享错误类。",
     "acceptanceCriteria": [
       "coverImage 为可选 URL",
       "旧文章无封面图时页面不报错",
       "新建和编辑文章均可保存封面图"
+    ],
+    "outOfScope": [
+      "本期不做本地图片上传"
     ]
+  }
+}
+```
+
+兼容直接重新提交：
+
+```json
+{
+  "requirement": "原始 PM 需求",
+  "confirmed": true,
+  "confirmationOverrides": {
+    "freeText": "PM 对开放问题的回答"
   }
 }
 ```
@@ -91,6 +106,12 @@ P4 沿用 P3 的 Audited Write Policy：
 - 本次人工验收建议。
 
 LLM review 使用一票否决策略：如果模型在 `risks` 或 `suggestions` 中提到破坏原有交互、回归、不符合产品逻辑、必须恢复/移除某段行为，即使它误判 `verdict=pass`，工具侧也会归一化为 `reject` 并进入失败回流。
+
+在 LLM review 前还会执行确定性检查：
+
+- 后端变更文件执行 `node --check`，提前发现语法错误。
+- `backend/controllers/articles.js` 必须完整导出 `allArticles/createArticle/singleArticle/updateArticle/deleteArticle/articlesFeed`。
+- `FormFieldset` 修改不得删除既有 props，且调用方不得传入未被组件支持的 props。
 
 对于封面图需求，人工验收建议至少包括：
 

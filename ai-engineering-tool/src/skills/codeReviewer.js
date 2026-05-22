@@ -56,7 +56,127 @@ function moduleToken(file) {
   return path.basename(file, path.extname(file));
 }
 
-function deterministicReview({ worktreePath, changedFiles }) {
+function readTextIfExists(filePath) {
+  if (!fs.existsSync(filePath)) return "";
+  return fs.readFileSync(filePath, "utf8");
+}
+
+function runBackendSyntaxChecks({ worktreePath, changedFiles }) {
+  const findings = [];
+  const backendFiles = changedFiles
+    .map((item) => item.file)
+    .filter((file) => file.startsWith("backend/") && file.endsWith(".js"));
+
+  for (const file of backendFiles) {
+    try {
+      execFileSync("node", ["--check", path.join(worktreePath, file)], {
+        cwd: worktreePath,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      findings.push({
+        file,
+        message: `后端 JS 语法检查失败：${String(error.stderr || error.message).trim()}`,
+      });
+    }
+  }
+
+  return findings;
+}
+
+function checkArticlesControllerExports({ worktreePath, changedFiles }) {
+  const touched = changedFiles.some((item) => item.file === "backend/controllers/articles.js");
+  if (!touched) return [];
+  const file = "backend/controllers/articles.js";
+  const content = readTextIfExists(path.join(worktreePath, file));
+  const requiredExports = [
+    "allArticles",
+    "createArticle",
+    "singleArticle",
+    "updateArticle",
+    "deleteArticle",
+    "articlesFeed",
+  ];
+  const moduleExportsMatch = content.match(/module\.exports\s*=\s*\{([\s\S]*?)\};/);
+
+  if (!moduleExportsMatch) {
+    return [{ file, message: "articles controller 缺少完整的 module.exports = { ... }; 导出块。" }];
+  }
+
+  const exportBlock = moduleExportsMatch[1];
+  const missing = requiredExports.filter((name) => !new RegExp(`\\b${name}\\b`).test(exportBlock));
+  if (missing.length === 0) return [];
+  return [{
+    file,
+    message: `articles controller 导出不完整，缺少：${missing.join(", ")}。`,
+  }];
+}
+
+function extractDestructuredProps(content, componentName) {
+  const match = content.match(new RegExp(`function\\s+${componentName}\\s*\\(\\s*\\{([\\s\\S]*?)\\}\\s*\\)`));
+  if (!match) return new Set();
+  return new Set(
+    match[1]
+      .split(",")
+      .map((item) => item.trim().replace(/\s*=.*$/, ""))
+      .filter(Boolean),
+  );
+}
+
+function checkFormFieldsetCompatibility({ gitRootPath, worktreePath, changedFiles }) {
+  const file = "frontend/src/components/FormFieldset/FormFieldset.jsx";
+  const changedFileNames = changedFiles.map((item) => item.file);
+  const currentContent = readTextIfExists(path.join(worktreePath, file));
+  if (!currentContent) return [];
+
+  let baseContent = "";
+  try {
+    baseContent = execFileSync("git", ["show", `HEAD:${file}`], {
+      cwd: gitRootPath,
+      encoding: "utf8",
+    });
+  } catch {
+    baseContent = "";
+  }
+
+  const currentProps = extractDestructuredProps(currentContent, "FormFieldset");
+  const baseProps = extractDestructuredProps(baseContent, "FormFieldset");
+  const findings = [];
+  const removedProps = [...baseProps].filter((prop) => !currentProps.has(prop));
+
+  if (changedFileNames.includes(file) && removedProps.length > 0) {
+    findings.push({
+      file,
+      message: `FormFieldset 移除了既有 props：${removedProps.join(", ")}，会破坏现有表单调用。`,
+    });
+  }
+
+  const filesToScan = changedFileNames.filter((changedFile) => changedFile.startsWith("frontend/src/"));
+  const unsupportedUsages = [];
+  for (const changedFile of filesToScan) {
+    const content = readTextIfExists(path.join(worktreePath, changedFile));
+    const matches = content.matchAll(/<FormFieldset\s+([^>]*?)\/?>/gs);
+    for (const match of matches) {
+      const attrs = [...match[1].matchAll(/\s([A-Za-z_$][\w$-]*)=/g)].map((attr) => attr[1]);
+      const unsupported = attrs.filter((attr) => !currentProps.has(attr));
+      if (unsupported.length > 0) {
+        unsupportedUsages.push(`${changedFile}: ${unsupported.join(", ")}`);
+      }
+    }
+  }
+
+  if (unsupportedUsages.length > 0) {
+    findings.push({
+      file,
+      message: `FormFieldset 调用传入了组件未声明的 props：${unsupportedUsages.join("；")}。`,
+    });
+  }
+
+  return findings;
+}
+
+function deterministicReview({ gitRootPath, worktreePath, changedFiles }) {
   const addedFrontendFiles = changedFiles
     .filter((item) => item.status === "A" && item.file.startsWith("frontend/src/"))
     .map((item) => item.file);
@@ -81,6 +201,24 @@ function deterministicReview({ worktreePath, changedFiles }) {
       risks: ["存在未接入真实入口的新增前端文件，人工访问目标页面时可能看不到需求效果。"],
       suggestions: ["在既有路由入口、页面组件或真实调用链中接入新增文件，或直接修改现有已接入文件。"],
       requiredChanges: [`接入或移除孤立新增文件：${orphanFiles.join(", ")}`],
+    };
+  }
+
+  const findings = [
+    ...runBackendSyntaxChecks({ worktreePath, changedFiles }),
+    ...checkArticlesControllerExports({ worktreePath, changedFiles }),
+    ...checkFormFieldsetCompatibility({ gitRootPath, worktreePath, changedFiles }),
+  ];
+
+  if (findings.length > 0) {
+    return {
+      verdict: "reject",
+      summary: `确定性检查发现 ${findings.length} 个阻断问题。`,
+      changedScope: changedFiles.map((item) => item.file),
+      estimatedImpact: "这些问题会导致服务启动失败、表单交互失效或核心模块导出不完整，必须在进入 LLM review 前修复。",
+      risks: findings.map((finding) => `${finding.file}: ${finding.message}`),
+      suggestions: ["优先修复确定性检查列出的文件，再重新进入代码生成或 review。"],
+      requiredChanges: findings.map((finding) => `${finding.file}: ${finding.message}`),
     };
   }
 
@@ -155,7 +293,7 @@ async function reviewGeneratedCode({
 }) {
   const diff = saveReviewDiff({ gitRootPath, targetRelativePath, runDir });
   const changedFiles = readChangedFiles({ gitRootPath, targetRelativePath });
-  const deterministicRejection = deterministicReview({ worktreePath, changedFiles });
+  const deterministicRejection = deterministicReview({ gitRootPath, worktreePath, changedFiles });
   if (deterministicRejection) {
     fs.writeFileSync(path.join(runDir, "code-review-raw.json"), JSON.stringify(deterministicRejection, null, 2));
     fs.writeFileSync(path.join(runDir, "code-review.json"), JSON.stringify(deterministicRejection, null, 2));

@@ -95,7 +95,7 @@ async function runWorkflow({
   try {
     const requirementStage = completeStage(
       runDir,
-      await clarifyRequirement({ requirement, runDir }),
+      await clarifyRequirement({ requirement, runDir, confirmationOverrides }),
     );
     const planStage = completeStage(runDir, planSolution({ requirement: requirementStage }));
     const stages = [requirementStage, planStage];
@@ -329,7 +329,24 @@ function readWorkflow(runId) {
   return readJson(path.join(__dirname, "..", "workspace", "runs", runId, "result.json"));
 }
 
+async function confirmWorkflow(runId, { confirmationOverrides = null, targetRepo } = {}) {
+  const existing = readWorkflow(runId);
+  if (existing.status !== "needs_confirmation") {
+    const error = new Error(`Workflow ${runId} is not waiting for confirmation`);
+    error.status = 409;
+    throw error;
+  }
+
+  return runWorkflow({
+    requirement: existing.requirement,
+    targetRepo: targetRepo || existing.targetRepo || defaultTargetRepo,
+    confirmed: true,
+    confirmationOverrides,
+  });
+}
+
 module.exports = {
+  confirmWorkflow,
   runWorkflow,
   readWorkflow,
 };

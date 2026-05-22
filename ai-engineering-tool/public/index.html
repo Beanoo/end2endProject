@@ -26,6 +26,14 @@
         width: 100%;
       }
 
+      .confirmation-input {
+        margin: 12px 0;
+      }
+
+      .confirmation-input textarea {
+        min-height: 96px;
+      }
+
       button {
         background: #2f6fed;
         border: 0;
@@ -93,7 +101,13 @@
           <p><strong>Branch:</strong> ${run.gitWorktree ? run.gitWorktree.branch : "not created yet"}</p>
           ${
             run.status === "needs_confirmation"
-              ? `<button id="confirm-run">Confirm and generate code</button>`
+              ? `
+                <div class="confirmation-input">
+                  <label for="confirmation-notes"><strong>Confirmation notes</strong></label>
+                  <textarea id="confirmation-notes" placeholder="回答开放问题、补充验收标准、明确不做范围。例如：coverImage 可为空；只允许 http/https URL；暂不做本地上传；不要修改共享错误类。"></textarea>
+                  <button id="confirm-run">Confirm and generate code</button>
+                </div>
+              `
               : ""
           }
           <div class="grid">
@@ -118,7 +132,34 @@
 
         const confirmButton = document.getElementById("confirm-run");
         if (confirmButton) {
-          confirmButton.addEventListener("click", () => runWorkflow({ confirmed: true }));
+          confirmButton.addEventListener("click", () => {
+            const notes = document.getElementById("confirmation-notes").value;
+            confirmWorkflow(run.runId, notes);
+          });
+        }
+      }
+
+      async function confirmWorkflow(runId, notes) {
+        runButton.disabled = true;
+        result.textContent = "Running with confirmation input...";
+
+        try {
+          const response = await fetch(`/api/workflows/${runId}/confirm`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              confirmationOverrides: {
+                freeText: notes,
+              },
+            }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "Workflow failed");
+          renderRun(payload);
+        } catch (error) {
+          result.innerHTML = `<pre>${error.message}</pre>`;
+        } finally {
+          runButton.disabled = false;
         }
       }
 

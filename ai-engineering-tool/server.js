@@ -3,7 +3,7 @@ const http = require("http");
 const path = require("path");
 const { defaultTargetRepo, port, projectRoot } = require("./src/config");
 const { getRepoStatus } = require("./src/git");
-const { readWorkflow, runWorkflow } = require("./src/orchestrator");
+const { confirmWorkflow, readWorkflow, runWorkflow } = require("./src/orchestrator");
 
 function sendJson(res, status, payload) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -46,9 +46,15 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 201, await runWorkflow(body));
     }
 
-    const match = req.url.match(/^\/api\/workflows\/([^/]+)$/);
-    if (req.method === "GET" && match) {
-      return sendJson(res, 200, readWorkflow(match[1]));
+    const confirmMatch = req.url.match(/^\/api\/workflows\/([^/]+)\/confirm$/);
+    if (req.method === "POST" && confirmMatch) {
+      const body = await readBody(req);
+      return sendJson(res, 201, await confirmWorkflow(confirmMatch[1], body));
+    }
+
+    const workflowMatch = req.url.match(/^\/api\/workflows\/([^/]+)$/);
+    if (req.method === "GET" && workflowMatch) {
+      return sendJson(res, 200, readWorkflow(workflowMatch[1]));
     }
 
     if (req.method === "GET") {
