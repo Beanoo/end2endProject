@@ -8,6 +8,11 @@ const locateModules = require("./skills/moduleLocator");
 const planTests = require("./skills/testPlanner");
 const packageDelivery = require("./skills/deliveryPackager");
 const writeKnowledge = require("./skills/knowledgeWriter");
+const {
+  buildConfirmationStage,
+  completeConfirmationStage,
+  requiresConfirmation,
+} = require("./skills/requirementConfirmation");
 const { generateAndApplyPatch } = require("./skills/patchGenerator");
 const { reviewGeneratedCode } = require("./skills/codeReviewer");
 const { runVerification } = require("./verification");
@@ -59,7 +64,12 @@ function buildCodeGenerationFeedback(error) {
   };
 }
 
-async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
+async function runWorkflow({
+  requirement,
+  targetRepo = defaultTargetRepo,
+  confirmed = false,
+  confirmationOverrides = null,
+} = {}) {
   if (!requirement || !requirement.trim()) {
     const error = new Error("requirement is required");
     error.status = 400;
@@ -88,6 +98,43 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
       await clarifyRequirement({ requirement, runDir }),
     );
     const planStage = completeStage(runDir, planSolution({ requirement: requirementStage }));
+    const stages = [requirementStage, planStage];
+
+    if (requiresConfirmation(requirementStage) && !confirmed) {
+      const confirmationStage = completeStage(
+        runDir,
+        buildConfirmationStage({ requirementStage, planStage, confirmationOverrides }),
+      );
+      stages.push(confirmationStage);
+      const result = {
+        runId,
+        status: "needs_confirmation",
+        requirement,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        targetRepo: target,
+        repoStatus,
+        stages,
+        artifacts,
+        nextAction: {
+          type: "confirm_requirement",
+          endpoint: "POST /api/workflows",
+          body: { requirement, targetRepo: target, confirmed: true, confirmationOverrides: {} },
+        },
+      };
+      writeJson(runDir, "result.json", result);
+      writeEvent(runDir, { type: "run_completed", runId, status: result.status });
+      return result;
+    }
+
+    if (requiresConfirmation(requirementStage) && confirmed) {
+      stages.push(
+        completeStage(
+          runDir,
+          completeConfirmationStage({ requirementStage, planStage, confirmationOverrides }),
+        ),
+      );
+    }
 
     const gitWorktree = createPlanningWorktree(target, runId);
     const targetRelativePath = path.relative(repoStatus.root, target);
@@ -98,7 +145,6 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
     gitWorktree.targetRelativePath = targetRelativePath || ".";
     writeEvent(runDir, { type: "worktree_created", gitWorktree });
 
-    const stages = [requirementStage, planStage];
     let feedback = null;
     let finalAttempt = null;
     const maxAttempts = 3;

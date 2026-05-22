@@ -54,6 +54,15 @@ function formatDiffPath(prefix, file) {
 function parseJson(content) {
   const trimmed = String(content || "").trim();
   const withoutFence = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
+  const arrayMatch = withoutFence.match(/\[[\s\S]*\]/);
+  if (arrayMatch) {
+    try {
+      const parsed = JSON.parse(arrayMatch[0]);
+      return Array.isArray(parsed) ? { files: parsed } : parsed;
+    } catch {
+      // Fall through to object parsing.
+    }
+  }
   const match = withoutFence.match(/\{[\s\S]*\}/);
   if (!match) return null;
   try {
@@ -277,6 +286,21 @@ function buildFileContext(worktreePath, moduleStage) {
     .join("\n\n");
 }
 
+function buildSliceFileContext(worktreePath, moduleStage, slice) {
+  const data = moduleStage?.data || {};
+  const allFiles = [...new Set([...(data.editBoundary || []), ...(data.readOnlyFiles || [])])];
+  const prefixes = slice?.expectedFiles || [];
+  const sliceFiles = allFiles.filter((file) => prefixes.some((prefix) => file.startsWith(prefix)));
+  const selected = sliceFiles.length > 0 ? sliceFiles : allFiles;
+
+  return selected
+    .map((file) => {
+      const content = readFilePreview(worktreePath, file, 12000);
+      return [`--- FILE: ${file} ---`, content].join("\n");
+    })
+    .join("\n\n");
+}
+
 function buildBoundary(moduleStage) {
   const data = moduleStage?.data || {};
   const allowedFiles = [...new Set([...(data.editBoundary || []), ...(data.relatedTests || [])])];
@@ -360,8 +384,27 @@ async function askForPatch({ runDir, purpose, requirementText, planStage, module
   );
 }
 
-async function askForFileWrites({ runDir, requirementText, planStage, moduleStage, fileContext, previous, feedback }) {
+async function askForFileWrites({
+  runDir,
+  requirementText,
+  planStage,
+  moduleStage,
+  fileContext,
+  previous,
+  feedback,
+  slice,
+  purpose = "code_file_rewrite_fallback",
+}) {
   const boundary = buildBoundary(moduleStage);
+  const sliceSection = slice
+    ? [
+        "",
+        "当前只处理这个 implementation slice：",
+        JSON.stringify(slice, null, 2),
+        "",
+        "只返回这个 slice 必需修改的文件；如果这个 slice 在当前代码中无需修改，返回 {\"files\":[]}.",
+      ].join("\n")
+    : "";
   const prompt = [
     "你是一个严谨的代码生成 Agent，目标仓库是 Conduit/RealWorld 全栈博客 monorepo。",
     "前面的 unified diff 多次应用失败。现在请改用结构化整文件写入方案。",
@@ -379,6 +422,7 @@ async function askForFileWrites({ runDir, requirementText, planStage, moduleStag
     "",
     "PM 需求和澄清结果：",
     requirementText,
+    sliceSection,
     "",
     "任务提示：",
     buildTaskHint(requirementText, moduleStage),
@@ -407,27 +451,31 @@ async function askForFileWrites({ runDir, requirementText, planStage, moduleStag
     fileContext,
   ].join("\n");
 
-  return parseJson(
-    await chatCompletion({
-      runDir,
-      purpose: "code_file_rewrite_fallback",
-      temperature: 0.05,
-      messages: [
-        {
-          role: "system",
-          content: "你只输出 JSON：{\"files\":[{\"path\":\"...\",\"content\":\"...\"}]}。",
-        },
-        { role: "user", content: prompt },
-      ],
-    }),
-  );
+  const raw = await chatCompletion({
+    runDir,
+    purpose,
+    temperature: 0.05,
+    messages: [
+      {
+        role: "system",
+        content: "你只输出 JSON：{\"files\":[{\"path\":\"...\",\"content\":\"...\"}]}。",
+      },
+      { role: "user", content: prompt },
+    ],
+  });
+
+  return {
+    raw,
+    parsed: parseJson(raw),
+  };
 }
 
-function applyFileWrites({ worktreePath, boundary, fileWrites }) {
+function applyFileWrites({ worktreePath, boundary, fileWrites, allowEmpty = false }) {
   const files = Array.isArray(fileWrites?.files) ? fileWrites.files : [];
   const touchedFiles = [];
 
   if (files.length === 0) {
+    if (allowEmpty) return touchedFiles;
     const error = new Error("File rewrite fallback returned no files");
     error.status = 422;
     throw error;
@@ -456,6 +504,71 @@ function applyFileWrites({ worktreePath, boundary, fileWrites }) {
   }
 
   return [...new Set(touchedFiles)];
+}
+
+async function applySlicedFileRewriteFallback({
+  runDir,
+  worktreePath,
+  boundary,
+  requirementText,
+  planStage,
+  moduleStage,
+  previous,
+  feedback,
+}) {
+  const slices = (planStage?.data?.implementationSlices || []).filter(
+    (slice) => slice.id !== "verification-and-review",
+  );
+  const effectiveSlices = slices.length > 0
+    ? slices
+    : [{ id: "single-scope-change", goal: "完成本次需求的最小可行代码修改。" }];
+  const touchedFiles = [];
+  const sliceAttempts = [];
+
+  for (const slice of effectiveSlices) {
+    const fileContext = buildSliceFileContext(worktreePath, moduleStage, slice);
+    const response = await askForFileWrites({
+      runDir,
+      requirementText,
+      planStage,
+      moduleStage,
+      fileContext,
+      previous,
+      feedback,
+      slice,
+      purpose: `code_file_rewrite_slice_${slice.id}`,
+    });
+    const safeSliceId = String(slice.id || "slice").replace(/[^a-z0-9_-]/gi, "_");
+    fs.writeFileSync(
+      path.join(runDir, `model-file-rewrite-${safeSliceId}.json`),
+      response.raw,
+    );
+
+    const sliceTouchedFiles = applyFileWrites({
+      worktreePath,
+      boundary,
+      fileWrites: response.parsed,
+      allowEmpty: true,
+    });
+    touchedFiles.push(...sliceTouchedFiles);
+    sliceAttempts.push({
+      sliceId: slice.id,
+      status: sliceTouchedFiles.length > 0 ? "applied" : "no_files",
+      touchedFiles: sliceTouchedFiles,
+    });
+  }
+
+  if (touchedFiles.length === 0) {
+    const error = new Error("Sliced file rewrite fallback returned no files");
+    error.status = 422;
+    error.sliceAttempts = sliceAttempts;
+    throw error;
+  }
+
+  return {
+    touchedFiles: [...new Set(touchedFiles)],
+    sliceAttempts,
+  };
 }
 
 function savePatch(runDir, name, patch) {
@@ -528,25 +641,75 @@ async function generateAndApplyPatch({
   }
 
   if (!appliedBy) {
-    const fileWrites = await askForFileWrites({
-      runDir,
-      requirementText,
-      planStage,
-      moduleStage,
-      fileContext,
-      previous,
-      feedback,
-    });
-    fs.writeFileSync(path.join(runDir, "model-file-rewrite.json"), JSON.stringify(fileWrites, null, 2));
-    touchedFiles = applyFileWrites({ worktreePath, boundary, fileWrites });
+    const slices = (planStage?.data?.implementationSlices || []).filter(
+      (slice) => slice.id !== "verification-and-review",
+    );
+    const shouldUseSlicedFallback = slices.length > 2;
+
+    if (shouldUseSlicedFallback) {
+      const slicedResult = await applySlicedFileRewriteFallback({
+        runDir,
+        worktreePath,
+        boundary,
+        requirementText,
+        planStage,
+        moduleStage,
+        previous,
+        feedback,
+      });
+      touchedFiles = slicedResult.touchedFiles;
+      attempts.push({
+        patchFile: "model-file-rewrite-*.json",
+        status: "applied",
+        touchedFiles,
+        applyMethod: "sliced_file_rewrite",
+        slices: slicedResult.sliceAttempts,
+      });
+    } else {
+      const response = await askForFileWrites({
+        runDir,
+        requirementText,
+        planStage,
+        moduleStage,
+        fileContext,
+        previous,
+        feedback,
+      });
+      fs.writeFileSync(path.join(runDir, "model-file-rewrite.json"), response.raw);
+      try {
+        touchedFiles = applyFileWrites({ worktreePath, boundary, fileWrites: response.parsed });
+        attempts.push({
+          patchFile: "model-file-rewrite.json",
+          status: "applied",
+          touchedFiles,
+          applyMethod: "file_rewrite",
+        });
+      } catch (error) {
+        const slicedResult = await applySlicedFileRewriteFallback({
+          runDir,
+          worktreePath,
+          boundary,
+          requirementText,
+          planStage,
+          moduleStage,
+          previous,
+          feedback,
+        });
+        touchedFiles = slicedResult.touchedFiles;
+        attempts.push({
+          patchFile: "model-file-rewrite-*.json",
+          status: "applied",
+          touchedFiles,
+          applyMethod: "sliced_file_rewrite_after_whole_file_failure",
+          wholeFileError: error.message,
+          slices: slicedResult.sliceAttempts,
+        });
+      }
+    }
     writeAudit = auditTouchedFiles(touchedFiles, moduleStage);
-    appliedBy = "model_file_rewrite_fallback";
-    attempts.push({
-      patchFile: "model-file-rewrite.json",
-      status: "applied",
-      touchedFiles,
-      applyMethod: "file_rewrite",
-    });
+    appliedBy = shouldUseSlicedFallback
+      ? "model_sliced_file_rewrite_fallback"
+      : attempts.at(-1)?.applyMethod || "model_file_rewrite_fallback";
   }
 
   const cumulativeTouchedFiles = getCumulativeTouchedFiles({ gitRootPath, targetRelativePath });

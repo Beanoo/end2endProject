@@ -89,8 +89,13 @@
         result.innerHTML = `
           <p><strong>Run:</strong> ${run.runId}</p>
           <p><strong>Status:</strong> ${run.status}</p>
-          <p><strong>Worktree:</strong> ${run.gitWorktree.path}</p>
-          <p><strong>Branch:</strong> ${run.gitWorktree.branch}</p>
+          <p><strong>Worktree:</strong> ${run.gitWorktree ? run.gitWorktree.path : "not created yet"}</p>
+          <p><strong>Branch:</strong> ${run.gitWorktree ? run.gitWorktree.branch : "not created yet"}</p>
+          ${
+            run.status === "needs_confirmation"
+              ? `<button id="confirm-run">Confirm and generate code</button>`
+              : ""
+          }
           <div class="grid">
             ${run.stages
               .map(
@@ -110,9 +115,14 @@
           <h3>Artifacts</h3>
           <pre>${JSON.stringify(run.artifacts, null, 2)}</pre>
         `;
+
+        const confirmButton = document.getElementById("confirm-run");
+        if (confirmButton) {
+          confirmButton.addEventListener("click", () => runWorkflow({ confirmed: true }));
+        }
       }
 
-      runButton.addEventListener("click", async () => {
+      async function runWorkflow(extraBody = {}) {
         runButton.disabled = true;
         result.textContent = "Running...";
 
@@ -120,7 +130,7 @@
           const response = await fetch("/api/workflows", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ requirement: requirement.value }),
+            body: JSON.stringify({ requirement: requirement.value, ...extraBody }),
           });
           const payload = await response.json();
           if (!response.ok) throw new Error(payload.error || "Workflow failed");
@@ -130,8 +140,9 @@
         } finally {
           runButton.disabled = false;
         }
-      });
+      }
+
+      runButton.addEventListener("click", () => runWorkflow());
     </script>
   </body>
 </html>
-

@@ -104,15 +104,42 @@ function buildReviewContext({ worktreePath, moduleStage, codeStage }) {
 }
 
 function normalizeReview(parsed) {
-  const verdict = String(parsed?.verdict || "").toLowerCase() === "pass" ? "pass" : "reject";
+  let verdict = String(parsed?.verdict || "").toLowerCase() === "pass" ? "pass" : "reject";
+  const risks = Array.isArray(parsed?.risks) ? parsed.risks : [];
+  const suggestions = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
+  const requiredChanges = Array.isArray(parsed?.requiredChanges) ? parsed.requiredChanges : [];
+  const reviewText = [...risks, ...suggestions, ...requiredChanges].join("\n");
+  const blockingSignals = [
+    "破坏",
+    "回归",
+    "不符合",
+    "无法",
+    "报错",
+    "误删",
+    "丢失",
+    "阻断",
+    "必须",
+    "移除",
+    "restore",
+    "regression",
+    "breaking",
+  ];
+
+  if (verdict === "pass" && requiredChanges.length > 0) {
+    verdict = "reject";
+  }
+  if (verdict === "pass" && blockingSignals.some((signal) => reviewText.toLowerCase().includes(signal))) {
+    verdict = "reject";
+  }
+
   return {
     verdict,
     summary: parsed?.summary || "",
     changedScope: Array.isArray(parsed?.changedScope) ? parsed.changedScope : [],
     estimatedImpact: parsed?.estimatedImpact || "",
-    risks: Array.isArray(parsed?.risks) ? parsed.risks : [],
-    suggestions: Array.isArray(parsed?.suggestions) ? parsed.suggestions : [],
-    requiredChanges: Array.isArray(parsed?.requiredChanges) ? parsed.requiredChanges : [],
+    risks,
+    suggestions,
+    requiredChanges,
   };
 }
 
@@ -150,6 +177,7 @@ async function reviewGeneratedCode({
     "请只基于本次需求、模块边界、代码 diff 和相关上下文做审查。",
     "不要挑纯风格偏好；重点审查功能正确性、回归风险、边界条件、安全/数据风险、测试缺口、是否越界修改。",
     "如果发现会导致功能错误、运行时错误、测试明显缺失或修改边界不合理的问题，verdict 必须是 reject。",
+    "如果风险或建议中包含破坏原有交互、回归、不符合产品逻辑、必须恢复/移除某段行为，verdict 必须是 reject，不能 pass。",
     "如果没有阻断性问题，verdict 为 pass，并说明代码变动范围和预估影响。",
     "只输出 JSON，不要 markdown。",
     "",
