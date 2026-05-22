@@ -1,0 +1,71 @@
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+--- /dev/null
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -0,0 +1,29 @@
++import Markdown from "markdown-to-jsx";
++import { useEffect, useState } from "react";
++import { useLocation, useParams } from "react-router-dom";
++import { useAuth } from "../../context/AuthContext";
++import getProfile from "../../services/getProfile";
++
++function ProfileAboutMe() {
++  const { state } = useLocation();
++  const [profile, setProfile] = useState(state || {});
++  const { headers } = useAuth();
++  const { username } = useParams();
++
++  useEffect(() => {
++    if (state && state.bio !== undefined) return;
++
++    getProfile({ headers, username })
++      .then(setProfile)
++      .catch(console.error);
++  }, [username, headers, state]);
++
++  const { bio } = profile;
++
++  return (
++    <div className="article-preview">
++      {bio ? (
++        <Markdown options={{ forceBlock: true }}>{bio}</Markdown>
++      ) : (
++        <p className="text-muted text-xs-center">该用户暂未填写个人简介</p>
++      )}
++    </div>
++  );
++}
++
++export default ProfileAboutMe;
+diff --git a/frontend/src/routes/Profile/Profile.jsx b/frontend/src/routes/Profile/Profile.jsx
+--- a/frontend/src/routes/Profile/Profile.jsx
++++ b/frontend/src/routes/Profile/Profile.jsx
+@@ -8,6 +8,7 @@ function Profile() {
+       <ContainerRow>
+         <div className="col-xs-12 col-md-10 offset-md-1">
+           <div className="articles-toggle">
+             <ul className="nav nav-pills outline-active">
+               <NavItem text="My Articles" url="" state={state} />
+               <NavItem text="Favorited Articles" url="favorites" state={state} />
++              <NavItem text="About Me" url="about" state={state} />
+             </ul>
+           </div>
+           <Outlet />
+diff --git a/frontend/src/main.jsx b/frontend/src/main.jsx
+--- a/frontend/src/main.jsx
++++ b/frontend/src/main.jsx
+@@ -14,6 +14,7 @@ import Article from "./routes/Article/Article";
+ import ArticleEditor from "./routes/ArticleEditor";
+ import Home from "./routes/Home";
+ import HomeArticles from "./routes/HomeArticles";
++import ProfileAboutMe from "./routes/Profile/ProfileAboutMe";
+ import Login from "./routes/Login";
+ import NotFound from "./routes/NotFound";
+ import Profile from "./routes/Profile/Profile";
+@@ -39,6 +40,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
+             <Route path="profile/:username" element={<Profile />}>
+               <Route index element={<ProfileArticles />} />
+               <Route path="favorites" element={<ProfileFavArticles />} />
++              <Route path="about" element={<ProfileAboutMe />} />
+             </Route>
+           </Route>
+           <Route path="*" element={<NotFound />} />

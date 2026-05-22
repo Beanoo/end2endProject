@@ -2,10 +2,11 @@ const fs = require("fs");
 const path = require("path");
 
 function writeDeliveryReport({ runDir, result }) {
-  const verification = result.stages.find((stage) => stage.name === "verification");
-  const codeGeneration = result.stages.find((stage) => stage.name === "code_generation");
-  const codeReview = result.stages.find((stage) => stage.name === "code_review");
-  const moduleLocation = result.stages.find((stage) => stage.name === "module_location");
+  const findLastStage = (name) => [...result.stages].reverse().find((stage) => stage.name === name);
+  const verification = findLastStage("verification");
+  const codeGeneration = findLastStage("code_generation");
+  const codeReview = findLastStage("code_review");
+  const moduleLocation = findLastStage("module_location");
   const touchedFiles = codeGeneration?.data?.touchedFiles || moduleLocation?.data?.editBoundary || [];
   const report = `# AI 工程工具提测说明
 

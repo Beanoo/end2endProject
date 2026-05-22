@@ -1,0 +1,81 @@
+diff --git a/backend/routes/profiles.js b/backend/routes/profiles.js
+--- a/backend/routes/profiles.js
++++ b/backend/routes/profiles.js
+@@ -2,7 +2,7 @@ const express = require("express");
+ const router = express.Router();
+ const verifyToken = require("../middleware/authentication");
+ const { getProfile, followToggler } = require("../controllers/profiles");
+ 
+-//? Profile
+-router.get("/:username", verifyToken, getProfile);
++//? Public Profile (no auth required for guest access)
++router.get("/:username", getProfile);
+ 
+ //* Follow Profile
+ router.post("/:username/follow", verifyToken, followToggler);
+ 
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+--- /dev/null
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -0,0 +1,13 @@
++function ProfileAboutMe({ profile }) {
++  return (
++    <div className="article-preview">
++      <div className="p-3">
++        <p className="text-break" style={{ whiteSpace: "pre-wrap", fontSize: "1.1rem", lineHeight: "1.6" }}>
++          {profile?.bio?.trim() ? profile.bio : "该用户暂未填写个人简介"}
++        </p>
++      </div>
++    </div>
++  );
++}
++
++export default ProfileAboutMe;
+diff --git a/frontend/src/routes/Profile/index.jsx b/frontend/src/routes/Profile/index.jsx
+--- a/frontend/src/routes/Profile/index.jsx
++++ b/frontend/src/routes/Profile/index.jsx
+@@ -1,4 +1,5 @@
+ import { Link, NavLink, Outlet, useParams } from "react-router-dom";
++import ProfileAboutMe from "./ProfileAboutMe";
+ import ProfileArticles from "./ProfileArticles";
+ import ProfileFavArticles from "./ProfileFavArticles";
+ import useProfile from "../../hooks/useProfile";
+@@ -22,6 +23,12 @@ function Profile() {
+         </div>
+       </div>
+ 
++      <div className="container">
++        <ul className="nav nav-pills outline-active">
++          <li className="nav-item">
++            <NavLink end to={`/profile/${username}/about`} className="nav-link">About Me</NavLink>
++          </li>
+           <li className="nav-item">
+             <NavLink end to={`/profile/${username}`} className="nav-link">My Articles</NavLink>
+           </li>
+@@ -29,6 +36,7 @@ function Profile() {
+             <NavLink to={`/profile/${username}/favorites`} className="nav-link">Favorited Articles</NavLink>
+           </li>
+         </ul>
++        <Outlet context={{ profile }} />
+       </div>
+     </div>
+   );
+@@ -36,5 +44,17 @@ function Profile() {
+ }
+ 
+ export default Profile;
++
++export const profileRoutes = [
++  {
++    path: "",
++    element: <ProfileArticles />,
++  },
++  {
++    path: "about",
++    element: <ProfileAboutMe />,
++  },
++  {
++    path: "favorites",
++    element: <ProfileFavArticles />,
++  },
++];

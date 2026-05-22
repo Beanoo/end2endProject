@@ -1,0 +1,84 @@
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+--- a/frontend/src/routes/Profile/ProfileAboutMe.jsx
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -1,11 +1,7 @@
+-import { useLocation } from "react-router-dom";
+-
+-function ProfileAboutMe() {
+-  const { state } = useLocation();
+-  const userBio = state?.bio;
++function ProfileAboutMe({ bio }) {
+ 
+   return (
+     <div className="article-preview">
+-      {userBio && userBio.trim() !== "" ? (
+-        <p>{userBio}</p>
++      {bio && bio.trim() !== "" ? (
++        <p>{bio}</p>
+       ) : (
+         <em>该用户暂未填写个人简介</em>
+       )}
+diff --git a/frontend/src/routes/Profile/Profile.jsx b/frontend/src/routes/Profile/Profile.jsx
+--- a/frontend/src/routes/Profile/Profile.jsx
++++ b/frontend/src/routes/Profile/Profile.jsx
+@@ -1,17 +1,37 @@
+-import { useLocation } from "react-router-dom";
++import { useEffect, useState } from "react";
++import { useParams, useLocation } from "react-router-dom";
++import axios from "axios";
++import { useAuth } from "../../context/AuthContext";
+ import AuthorInfo from "../../components/AuthorInfo";
+ import ContainerRow from "../../components/ContainerRow";
+ import NavItem from "../../components/NavItem";
+ import ProfileAboutMe from "./ProfileAboutMe";
+ import ProfileArticles from "./ProfileArticles";
+ import ProfileFavArticles from "./ProfileFavArticles";
+ 
+ function Profile() {
+-  const { state, pathname } = useLocation();
++  const { username } = useParams();
++  const { loggedUser } = useAuth();
++  const [profile, setProfile] = useState(null);
++  const { pathname } = useLocation();
++
++  useEffect(() => {
++    const fetchProfile = async () => {
++      try {
++        const headers = loggedUser ? { Authorization: `Token ${loggedUser.token}` } : {};
++        const { data } = await axios.get(`/api/profiles/${username}`, { headers });
++        setProfile(data.profile);
++      } catch (err) {
++        console.error("Load profile failed:", err);
++      }
++    };
++    fetchProfile();
++  }, [username, loggedUser]);
+ 
+   const renderContent = () => {
++    if (!profile) return <div className="article-preview"><em>Loading profile...</em></div>;
+     if (pathname.endsWith("/about-me")) {
+-      return <ProfileAboutMe />;
++      return <ProfileAboutMe bio={profile.bio} />;
+     } else if (pathname.endsWith("/favorites")) {
+       return <ProfileFavArticles />;
+     } else {
+@@ -20,12 +40,12 @@ function Profile() {
+ 
+   return (
+     <div className="profile-page">
+       <div className="user-info">
+         <ContainerRow>
+-          <AuthorInfo />
++          <AuthorInfo profile={profile} />
+         </ContainerRow>
+       </div>
+ 
+       <ContainerRow>
+         <div className="col-xs-12 col-md-10 offset-md-1">
+           <div className="articles-toggle">
+             <ul className="nav nav-pills outline-active">
+-              <NavItem text="About Me" url="about-me" state={state} />
++              <NavItem text="About Me" url="about-me" />
+               <NavItem text="My Articles" url="" />
+               <NavItem text="Favorited Articles" url="favorites" />
+             </ul>

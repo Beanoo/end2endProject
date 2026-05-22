@@ -1,0 +1,180 @@
+diff --git a/backend/controllers/profiles.js b/backend/controllers/profiles.js
+index 66ffabe..6ce2305 100644
+--- a/backend/controllers/profiles.js
++++ b/backend/controllers/profiles.js
+@@ -5,7 +5,7 @@ const { User } = require("../models");
+ //? Profile
+ const getProfile = async (req, res, next) => {
+   try {
+-    const { loggedUser } = req;
++    const loggedUser = req.loggedUser || null;
+     const { username } = req.params;
+ 
+     const profile = await User.findOne({
+diff --git a/backend/routes/profiles.js b/backend/routes/profiles.js
+index 206beee..31f587f 100644
+--- a/backend/routes/profiles.js
++++ b/backend/routes/profiles.js
+@@ -3,8 +3,8 @@ const router = express.Router();
+ const verifyToken = require("../middleware/authentication");
+ const { getProfile, followToggler } = require("../controllers/profiles");
+ 
+-//? Profile
+-router.get("/:username", verifyToken, getProfile);
++//? Public Profile (no auth required for guest access)
++router.get("/:username", getProfile);
+ 
+ //* Follow Profile
+ router.post("/:username/follow", verifyToken, followToggler);
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+new file mode 100644
+index 0000000..3128f29
+--- /dev/null
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -0,0 +1,16 @@
++import { useOutletContext } from "react-router-dom";
++
++function ProfileAboutMe() {
++  const { profile } = useOutletContext();
++  return (
++    <div className="article-preview">
++      <div className="p-3">
++        <p className="text-break" style={{ whiteSpace: "pre-wrap", fontSize: "1.1rem", lineHeight: "1.6" }}>
++          {profile?.bio?.trim() ? profile.bio : "该用户暂未填写个人简介"}
++        </p>
++      </div>
++    </div>
++  );
++}
++
++export default ProfileAboutMe;
+diff --git a/frontend/src/routes/Profile/index.jsx b/frontend/src/routes/Profile/index.jsx
+new file mode 100644
+index 0000000..075ba48
+--- /dev/null
++++ b/frontend/src/routes/Profile/index.jsx
+@@ -0,0 +1,50 @@
++import { Link, NavLink, Outlet, useParams } from "react-router-dom";
++import ProfileAboutMe from "./ProfileAboutMe";
++import ProfileArticles from "./ProfileArticles";
++import ProfileFavArticles from "./ProfileFavArticles";
++import useProfile from "../../hooks/useProfile";
++
++function Profile() {
++  const { username } = useParams();
++  const { profile, loading } = useProfile(username);
++
++  if (loading) {
++    return <div className="container"><em>Loading profile...</em></div>;
++  }
++
++  return (
++    <div className="profile-page">
++      <div className="user-info">
++        <div className="container">
++          <div className="row">
++            <div className="col-xs-12 col-md-10 offset-md-1">
++              <img src={profile.image} className="user-img" alt="" />
++              <h4>{profile.username}</h4>
++              <p>{profile.bio}</p>
++              <Link to="/settings" className="btn btn-sm btn-outline-secondary action-btn">
++                <i className="ion-gear-a"></i> Edit Profile Settings
++              </Link>
++            </div>
++          </div>
++        </div>
++      </div>
++
++      <div className="container">
++        <ul className="nav nav-pills outline-active">
++          <li className="nav-item">
++            <NavLink to={`/profile/${username}/about`} className="nav-link">About Me</NavLink>
++          </li>
++          <li className="nav-item">
++            <NavLink end to={`/profile/${username}`} className="nav-link">My Articles</NavLink>
++          </li>
++          <li className="nav-item">
++            <NavLink to={`/profile/${username}/favorites`} className="nav-link">Favorited Articles</NavLink>
++          </li>
++        </ul>
++        <Outlet context={{ profile }} />
++      </div>
++    </div>
++  );
++}
++
++export default Profile;
+diff --git a/frontend/src/routes/index.jsx b/frontend/src/routes/index.jsx
+new file mode 100644
+index 0000000..0924b3a
+--- /dev/null
++++ b/frontend/src/routes/index.jsx
+@@ -0,0 +1,68 @@
++import { createBrowserRouter } from "react-router-dom";
++import Home from "./Home";
++import Login from "./Login";
++import Register from "./Register";
++import Profile from "./Profile";
++import ProfileArticles from "./Profile/ProfileArticles";
++import ProfileFavArticles from "./Profile/ProfileFavArticles";
++import ProfileAboutMe from "./Profile/ProfileAboutMe";
++import Settings from "./Settings";
++import NewArticle from "./NewArticle";
++import EditArticle from "./EditArticle";
++import Article from "./Article";
++import NotFound from "./NotFound";
++
++const routes = [
++  {
++    path: "/",
++    element: <Home />,
++  },
++  {
++    path: "/login",
++    element: <Login />,
++  },
++  {
++    path: "/register",
++    element: <Register />,
++  },
++  {
++    path: "/settings",
++    element: <Settings />,
++  },
++  {
++    path: "/editor",
++    element: <NewArticle />,
++  },
++  {
++    path: "/editor/:slug",
++    element: <EditArticle />,
++  },
++  {
++    path: "/article/:slug",
++    element: <Article />,
++  },
++  {
++    path: "/profile/:username",
++    element: <Profile />,
++    children: [
++      {
++        index: true,
++        element: <ProfileArticles />,
++      },
++      {
++        path: "favorites",
++        element: <ProfileFavArticles />,
++      },
++      {
++        path: "about",
++        element: <ProfileAboutMe />,
++      },
++    ],
++  },
++  {
++    path: "*",
++    element: <NotFound />,
++  },
++];
++
++export default createBrowserRouter(routes);

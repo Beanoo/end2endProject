@@ -1,0 +1,91 @@
+diff --git a/frontend/src/routes/Profile/Profile.jsx b/frontend/src/routes/Profile/Profile.jsx
+index 6b30fdc..f90c61c 100644
+--- a/frontend/src/routes/Profile/Profile.jsx
++++ b/frontend/src/routes/Profile/Profile.jsx
+@@ -1,16 +1,49 @@
+-import { Outlet, useLocation } from "react-router-dom";
++import { useEffect, useState } from "react";
++import { useParams, useLocation } from "react-router-dom";
++import axios from "axios";
++import { useAuth } from "../../context/AuthContext";
+ import AuthorInfo from "../../components/AuthorInfo";
+ import ContainerRow from "../../components/ContainerRow";
+ import NavItem from "../../components/NavItem";
++import ProfileAboutMe from "./ProfileAboutMe";
++import ProfileArticles from "./ProfileArticles";
++import ProfileFavArticles from "./ProfileFavArticles";
+ 
+ function Profile() {
+-  const { state } = useLocation();
++  const { username } = useParams();
++  const { loggedUser } = useAuth();
++  const [profile, setProfile] = useState(null);
++  const { pathname } = useLocation();
++
++  useEffect(() => {
++    const fetchProfile = async () => {
++      try {
++        const headers = loggedUser ? { Authorization: `Token ${loggedUser.token}` } : {};
++        const { data } = await axios.get(`/api/profiles/${username}`, { headers });
++        setProfile(data.profile);
++      } catch (err) {
++        console.error("Load profile failed:", err);
++      }
++    };
++    fetchProfile();
++  }, [username, loggedUser]);
++
++  const renderContent = () => {
++    if (!profile) return <div className="article-preview"><em>Loading profile...</em></div>;
++    if (pathname.endsWith("/about-me")) {
++      return <ProfileAboutMe bio={profile.bio} />;
++    } else if (pathname.endsWith("/favorites")) {
++      return <ProfileFavArticles />;
++    } else {
++      return <ProfileArticles />;
++    }
++  };
+ 
+   return (
+     <div className="profile-page">
+       <div className="user-info">
+         <ContainerRow>
+-          <AuthorInfo />
++          <AuthorInfo profile={profile} />
+         </ContainerRow>
+       </div>
+ 
+@@ -18,11 +51,12 @@ function Profile() {
+         <div className="col-xs-12 col-md-10 offset-md-1">
+           <div className="articles-toggle">
+             <ul className="nav nav-pills outline-active">
++              <NavItem text="About Me" url="about-me" state={state} />
+               <NavItem text="My Articles" url="" state={state} />
+               <NavItem text="Favorited Articles" url="favorites" state={state} />
+             </ul>
+           </div>
+-          <Outlet />
++          {renderContent()}
+         </div>
+       </ContainerRow>
+     </div>
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+new file mode 100644
+index 0000000..8ee8c12
+--- /dev/null
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -0,0 +1,14 @@
++function ProfileAboutMe({ bio }) {
++
++  return (
++    <div className="article-preview">
++      {bio && bio.trim() !== "" ? (
++        <p>{bio}</p>
++      ) : (
++        <em>该用户暂未填写个人简介</em>
++      )}
++    </div>
++  );
++}
++
++export default ProfileAboutMe;

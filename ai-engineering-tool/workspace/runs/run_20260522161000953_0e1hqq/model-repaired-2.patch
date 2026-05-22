@@ -1,0 +1,83 @@
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+--- a/frontend/src/routes/Profile/ProfileAboutMe.jsx
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -1,19 +1,32 @@
+-import { useLocation } from "react-router-dom";
++import { useState, useEffect } from "react";
++import { useParams } from "react-router-dom";
++import { useAuth } from "../../context/AuthContext";
++import getProfile from "../../services/getProfile";
+ 
+ function ProfileAboutMe() {
+-  const { state } = useLocation();
+-  const bio = state?.bio;
++  const { username } = useParams();
++  const { headers } = useAuth();
++  const [bio, setBio] = useState("");
++  const [loading, setLoading] = useState(true);
++
++  useEffect(() => {
++    setLoading(true);
++    getProfile({ username, headers })
++      .then(res => setBio(res.profile.bio || ""))
++      .finally(() => setLoading(false));
++  }, [username, headers]);
+ 
+   return (
+     <div className="profile-about-me">
+       <div className="article-preview">
+         {bio && bio.trim() ? (
+           <p style={{ whiteSpace: "pre-wrap" }}>{bio}</p>
+         ) : (
++          loading ? (
++            <em>Loading profile info...</em>
++          ) : (
+             <em>该用户暂未填写个人简介</em>
++          )
+         )}
+       </div>
+     </div>
+   );
+ }
+ 
+ export default ProfileAboutMe;
+diff --git a/frontend/src/routes/Profile/Profile.jsx b/frontend/src/routes/Profile/Profile.jsx
+--- a/frontend/src/routes/Profile/Profile.jsx
++++ b/frontend/src/routes/Profile/Profile.jsx
+@@ -1,23 +1,19 @@
+-import { Outlet, useLocation } from "react-router-dom";
++import { Outlet } from "react-router-dom";
+ import AuthorInfo from "../../components/AuthorInfo";
+ import ContainerRow from "../../components/ContainerRow";
+ import NavItem from "../../components/NavItem";
+ 
+ function Profile() {
+-  const { state } = useLocation();
+ 
+   return (
+     <div className="profile-page">
+       <div className="user-info">
+         <ContainerRow>
+           <AuthorInfo />
+         </ContainerRow>
+       </div>
+       <ContainerRow>
+         <div className="col-xs-12 col-md-10 offset-md-1">
+           <div className="articles-toggle">
+             <ul className="nav nav-pills outline-active">
+-              <NavItem text="My Articles" url="" state={state} />
+-              <NavItem text="Favorited Articles" url="favorites" state={state} />
+-              <NavItem text="About Me" url="about-me" state={state} />
++              <NavItem text="My Articles" url="" />
++              <NavItem text="Favorited Articles" url="favorites" />
++              <NavItem text="About Me" url="about-me" />
+             </ul>
+           </div>
+           <Outlet />
+         </div>
+       </ContainerRow>
+     </div>
+   );
+ }
+ 
+ export default Profile;

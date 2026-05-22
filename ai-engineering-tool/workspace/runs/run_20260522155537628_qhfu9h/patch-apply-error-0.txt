@@ -1,0 +1,1 @@
+Patch touches disallowed files: frontend/src/main.jsx

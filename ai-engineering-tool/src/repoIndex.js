@@ -126,17 +126,18 @@ function detectDomains(requirement) {
 
 function scoreFile({ file, content, terms, matchedDomains }) {
   const haystack = `${file}\n${content}`.toLowerCase();
+  const lowerFile = file.toLowerCase();
   let score = 0;
 
   for (const term of terms) {
     const normalized = term.toLowerCase();
-    if (file.toLowerCase().includes(normalized)) score += 8;
+    if (lowerFile.includes(normalized)) score += 8;
     if (haystack.includes(normalized)) score += 2;
   }
 
   for (const domain of matchedDomains) {
     for (const pathHint of domain.paths) {
-      if (file.toLowerCase().includes(pathHint.toLowerCase())) score += 10;
+      if (lowerFile.includes(pathHint.toLowerCase())) score += 10;
     }
   }
 
@@ -164,6 +165,15 @@ function scoreFile({ file, content, terms, matchedDomains }) {
     terms.some((term) => ["tab", "about", "about-me", "favorites", "favorited", "profile"].includes(term))
   ) {
     score += 24;
+  }
+  const uiTerms = ["page", "tab", "display", "show", "页面", "展示", "显示", "导航"];
+  const apiTerms = ["api", "接口", "后端", "数据库", "鉴权", "权限"];
+  const looksLikeUiDemand = terms.some((term) => uiTerms.includes(term));
+  const looksLikeApiDemand = terms.some((term) => apiTerms.includes(term));
+  if (looksLikeUiDemand && !looksLikeApiDemand) {
+    if (lowerFile.startsWith("frontend/src/routes/")) score += 20;
+    if (lowerFile.startsWith("frontend/src/components/")) score += 12;
+    if (lowerFile.startsWith("backend/")) score -= 12;
   }
 
   return score;

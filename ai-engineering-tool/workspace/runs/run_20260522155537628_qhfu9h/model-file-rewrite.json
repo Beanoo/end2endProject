@@ -1,0 +1,12 @@
+{
+  "files": [
+    {
+      "path": "frontend/src/routes/Profile/Profile.jsx",
+      "content": "import { useLocation } from \"react-router-dom\";\nimport AuthorInfo from \"../../components/AuthorInfo\";\nimport ContainerRow from \"../../components/ContainerRow\";\nimport NavItem from \"../../components/NavItem\";\nimport ProfileAboutMe from \"./ProfileAboutMe\";\nimport ProfileArticles from \"./ProfileArticles\";\nimport ProfileFavArticles from \"./ProfileFavArticles\";\n\nfunction Profile() {\n  const { state, pathname } = useLocation();\n\n  const renderContent = () => {\n    if (pathname.endsWith(\"/about-me\")) {\n      return <ProfileAboutMe />;\n    } else if (pathname.endsWith(\"/favorites\")) {\n      return <ProfileFavArticles />;\n    } else {\n      return <ProfileArticles />;\n    }\n  };\n\n  return (\n    <div className=\"profile-page\">\n      <div className=\"user-info\">\n        <ContainerRow>\n          <AuthorInfo />\n        </ContainerRow>\n      </div>\n\n      <ContainerRow>\n        <div className=\"col-xs-12 col-md-10 offset-md-1\">\n          <div className=\"articles-toggle\">\n            <ul className=\"nav nav-pills outline-active\">\n              <NavItem text=\"About Me\" url=\"about-me\" state={state} />\n              <NavItem text=\"My Articles\" url=\"\" state={state} />\n              <NavItem text=\"Favorited Articles\" url=\"favorites\" state={state} />\n            </ul>\n          </div>\n          {renderContent()}\n        </div>\n      </ContainerRow>\n    </div>\n  );\n}\n\nexport default Profile;"
+    },
+    {
+      "path": "frontend/src/routes/Profile/ProfileAboutMe.jsx",
+      "content": "import { useLocation } from \"react-router-dom\";\n\nfunction ProfileAboutMe() {\n  const { state } = useLocation();\n  const userBio = state?.bio;\n\n  return (\n    <div className=\"article-preview\">\n      {userBio && userBio.trim() !== \"\" ? (\n        <p>{userBio}</p>\n      ) : (\n        <em>该用户暂未填写个人简介</em>\n      )}\n    </div>\n  );\n}\n\nexport default ProfileAboutMe;"
+    }
+  ]
+}

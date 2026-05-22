@@ -1,0 +1,12 @@
+{
+  "files": [
+    {
+      "path": "frontend/src/routes/Profile/ProfileAboutMe.jsx",
+      "content": "import { useState, useEffect } from \"react\";\nimport { useParams } from \"react-router-dom\";\nimport { useAuth } from \"../../context/AuthContext\";\nimport getProfile from \"../../services/getProfile\";\n\nfunction ProfileAboutMe() {\n  const { username } = useParams();\n  const { headers } = useAuth();\n  const [bio, setBio] = useState(\"\");\n  const [loading, setLoading] = useState(true);\n\n  useEffect(() => {\n    setLoading(true);\n    getProfile({ username, headers })\n      .then(res => setBio(res.profile.bio || \"\"))\n      .finally(() => setLoading(false));\n  }, [username, headers]);\n\n  return (\n    <div className=\"profile-about-me\">\n      <div className=\"article-preview\">\n        {loading ? (\n          <em>Loading profile info...</em>\n        ) : bio && bio.trim() ? (\n          <p style={{ whiteSpace: \"pre-wrap\" }}>{bio}</p>\n        ) : (\n          <em>该用户暂未填写个人简介</em>\n        )}\n      </div>\n    </div>\n  );\n}\n\nexport default ProfileAboutMe;\n"
+    },
+    {
+      "path": "frontend/src/routes/Profile/Profile.jsx",
+      "content": "import { Outlet } from \"react-router-dom\";\nimport AuthorInfo from \"../../components/AuthorInfo\";\nimport ContainerRow from \"../../components/ContainerRow\";\nimport NavItem from \"../../components/NavItem\";\n\nfunction Profile() {\n  return (\n    <div className=\"profile-page\">\n      <div className=\"user-info\">\n        <ContainerRow>\n          <AuthorInfo />\n        </ContainerRow>\n      </div>\n\n      <ContainerRow>\n        <div className=\"col-xs-12 col-md-10 offset-md-1\">\n          <div className=\"articles-toggle\">\n            <ul className=\"nav nav-pills outline-active\">\n              <NavItem text=\"My Articles\" url=\"\" />\n              <NavItem text=\"Favorited Articles\" url=\"favorites\" />\n              <NavItem text=\"About Me\" url=\"about-me\" />\n            </ul>\n          </div>\n          <Outlet />\n        </div>\n      </ContainerRow>\n    </div>\n  );\n}\n\nexport default Profile;\n"
+    }
+  ]
+}

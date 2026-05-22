@@ -262,7 +262,12 @@ function buildBoundary(moduleStage) {
   };
 }
 
-async function askForPatch({ runDir, purpose, requirementText, planStage, moduleStage, fileContext, previous }) {
+function formatFeedback(feedback) {
+  if (!feedback) return "";
+  return JSON.stringify(feedback, null, 2);
+}
+
+async function askForPatch({ runDir, purpose, requirementText, planStage, moduleStage, fileContext, previous, feedback }) {
   const boundary = buildBoundary(moduleStage);
   const repairSection = previous
     ? [
@@ -295,6 +300,7 @@ async function askForPatch({ runDir, purpose, requirementText, planStage, module
     "",
     "方案约束：",
     JSON.stringify(planStage?.data || {}, null, 2),
+    feedback ? ["", "上一次失败反馈：", formatFeedback(feedback)].join("\n") : "",
     "",
     "可修改的既有文件：",
     boundary.allowedFiles.map((file) => `- ${file}`).join("\n") || "- 无",
@@ -327,7 +333,7 @@ async function askForPatch({ runDir, purpose, requirementText, planStage, module
   );
 }
 
-async function askForFileWrites({ runDir, requirementText, planStage, moduleStage, fileContext, previous }) {
+async function askForFileWrites({ runDir, requirementText, planStage, moduleStage, fileContext, previous, feedback }) {
   const boundary = buildBoundary(moduleStage);
   const prompt = [
     "你是一个严谨的代码生成 Agent，目标仓库是 Conduit/RealWorld 全栈博客 monorepo。",
@@ -352,6 +358,7 @@ async function askForFileWrites({ runDir, requirementText, planStage, moduleStag
     "",
     "方案约束：",
     JSON.stringify(planStage?.data || {}, null, 2),
+    feedback ? ["", "上一次失败反馈：", formatFeedback(feedback)].join("\n") : "",
     "",
     "可修改的既有文件：",
     boundary.allowedFiles.map((file) => `- ${file}`).join("\n") || "- 无",
@@ -432,6 +439,7 @@ async function generateAndApplyPatch({
   requirementStage,
   planStage,
   moduleStage,
+  feedback,
 }) {
   const requirementText = getRequirementText(requirementStage);
   const fileContext = buildFileContext(worktreePath, moduleStage);
@@ -458,6 +466,7 @@ async function generateAndApplyPatch({
         moduleStage,
         fileContext,
         previous,
+        feedback,
       }),
     );
     savePatch(runDir, patchFile, patch);
@@ -484,6 +493,7 @@ async function generateAndApplyPatch({
       moduleStage,
       fileContext,
       previous,
+      feedback,
     });
     fs.writeFileSync(path.join(runDir, "model-file-rewrite.json"), JSON.stringify(fileWrites, null, 2));
     touchedFiles = applyFileWrites({ worktreePath, boundary, fileWrites });

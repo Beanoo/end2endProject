@@ -1,0 +1,65 @@
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+--- a/frontend/src/routes/Profile/ProfileAboutMe.jsx
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -1,7 +1,19 @@
+-import { useLocation } from "react-router-dom";
++import { useState, useEffect } from "react";
++import { useParams } from "react-router-dom";
++import { useAuth } from "../../context/AuthContext";
++import getProfile from "../../services/getProfile";
+ 
+ function ProfileAboutMe() {
+-  const { state } = useLocation();
+-  const bio = state?.bio;
++  const { username } = useParams();
++  const { headers } = useAuth();
++  const [bio, setBio] = useState("");
++  const [loading, setLoading] = useState(true);
++
++  useEffect(() => {
++    setLoading(true);
++    getProfile({ username, headers })
++      .then(res => setBio(res.profile.bio || ""))
++      .finally(() => setLoading(false));
++  }, [username, headers]);
+ 
+   return (
+     <div className="profile-about-me">
+@@ -9,6 +21,10 @@ function ProfileAboutMe() {
+         {bio && bio.trim() ? (
+           <p style={{ whiteSpace: "pre-wrap" }}>{bio}</p>
+         ) : (
++          loading ? (
++            <em>Loading profile info...</em>
++          ) : (
+             <em>该用户暂未填写个人简介</em>
++          )
+         )}
+       </div>
+     </div>
+diff --git a/frontend/src/routes/Profile/Profile.jsx b/frontend/src/routes/Profile/Profile.jsx
+--- a/frontend/src/routes/Profile/Profile.jsx
++++ b/frontend/src/routes/Profile/Profile.jsx
+@@ -1,10 +1,9 @@
+-import { Outlet, useLocation } from "react-router-dom";
++import { Outlet } from "react-router-dom";
+ import AuthorInfo from "../../components/AuthorInfo";
+ import ContainerRow from "../../components/ContainerRow";
+ import NavItem from "../../components/NavItem";
+ 
+ function Profile() {
+-  const { state } = useLocation();
+ 
+   return (
+     <div className="profile-page">
+@@ -18,9 +17,9 @@ function Profile() {
+           <div className="articles-toggle">
+             <ul className="nav nav-pills outline-active">
+               <NavItem text="My Articles" url="" />
+-              <NavItem text="Favorited Articles" url="favorites" state={state} />
+-              <NavItem text="About Me" url="about-me" state={state} />
++              <NavItem text="Favorited Articles" url="favorites" />
++              <NavItem text="About Me" url="about-me" />
+             </ul>
+           </div>
+           <Outlet />

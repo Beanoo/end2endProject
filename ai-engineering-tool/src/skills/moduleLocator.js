@@ -6,6 +6,7 @@ const {
   listSourceFiles,
   selectCandidateFiles,
 } = require("../repoIndex");
+const { buildExploration } = require("../repoExplorer");
 
 const allowedNewFilePrefixes = [
   "frontend/src/components/",
@@ -51,64 +52,65 @@ function fallbackBoundary(index) {
   };
 }
 
-function isSmallUiCopyRequirement(requirementText) {
-  const text = String(requirementText || "").toLowerCase();
-  const copySignals = ["文案", "标题", "辅助", "提示", "显示", "展示", "label", "text", "copy"];
-  const structuralSignals = ["接口", "数据库", "权限", "认证", "新增页面", "schema", "api", "migration"];
-  return copySignals.some((term) => text.includes(term)) && !structuralSignals.some((term) => text.includes(term));
-}
-
 function rankBoundaryByIndex(files, index) {
   const scoreByFile = new Map(index.files.map((item) => [item.file, item.score]));
   return [...files].sort((a, b) => (scoreByFile.get(b) || 0) - (scoreByFile.get(a) || 0) || a.localeCompare(b));
 }
 
-function constrainEditBoundary({ editBoundary, index, requirementText }) {
-  if (!isSmallUiCopyRequirement(requirementText)) return editBoundary;
-  const frontendOnly = editBoundary.filter((file) => file.startsWith("frontend/src/"));
-  const candidates = frontendOnly.length > 0 ? frontendOnly : editBoundary;
-  return rankBoundaryByIndex(candidates, index).slice(0, 2);
+function normalizeFeedback(feedback) {
+  return [
+    feedback?.reason,
+    feedback?.summary,
+    feedback?.error,
+    ...(feedback?.failedFiles || []),
+    ...(feedback?.missingFiles || []),
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function needsFrontendRouteBoundary(requirementText) {
-  const text = String(requirementText || "").toLowerCase();
-  const routeSignals = ["tab", "route", "页面", "子路由", "导航", "nav", "about me", "favorited articles"];
-  return text.includes("profile") && routeSignals.some((term) => text.includes(term));
-}
-
-function supplementEditBoundary({ editBoundary, worktreePath, requirementText }) {
-  const supplemented = [...editBoundary];
-  const routeRegistry = "frontend/src/main.jsx";
-  if (
-    needsFrontendRouteBoundary(requirementText) &&
-    fs.existsSync(path.join(worktreePath, routeRegistry)) &&
-    !supplemented.includes(routeRegistry)
-  ) {
-    supplemented.push(routeRegistry);
+function extractFailureFiles(text, allFiles) {
+  const found = new Set();
+  const sourcePathPattern = /(?:src\/|frontend\/src\/|backend\/)[A-Za-z0-9_./-]+\.(?:js|jsx|mjs|cjs|json|css)/g;
+  const matches = String(text || "").match(sourcePathPattern) || [];
+  for (const match of matches) {
+    const normalized = match.startsWith("src/") ? `frontend/${match}` : match;
+    if (allFiles.includes(normalized)) found.add(normalized);
   }
-  return supplemented;
+  return [...found];
 }
 
-function supplementReadOnlyFiles({ readOnlyFiles, worktreePath, requirementText }) {
-  const supplemented = [...readOnlyFiles];
-  const text = String(requirementText || "").toLowerCase();
-  const profileContextFiles = [
-    "frontend/src/components/AuthorInfo/AuthorInfo.jsx",
-    "frontend/src/services/getProfile.js",
+function buildBoundarySets({ worktreePath, index, modelDecision, fallback, allFiles, requirementText, feedback }) {
+  const sourceFileSet = new Set(allFiles);
+  const modelEditBoundary = normalizeFiles(worktreePath, modelDecision?.editBoundary, sourceFileSet);
+  const modelReadOnlyFiles = normalizeFiles(worktreePath, modelDecision?.readOnlyFiles, sourceFileSet);
+  const seedBoundary = modelEditBoundary.length > 0 ? modelEditBoundary : fallback.editBoundary;
+  const feedbackText = normalizeFeedback(feedback);
+  const feedbackFiles = extractFailureFiles(feedbackText, allFiles);
+  const exploration = buildExploration(worktreePath, [...seedBoundary, ...feedbackFiles], index.terms);
+  const editableExploredFiles = exploration
+    .filter((item) => item.reason.startsWith("imports ") || item.reason === "structural file references seed module")
+    .map((item) => item.file);
+  const exploredFiles = exploration.map((item) => item.file);
+  const candidateEditBoundary = rankBoundaryByIndex(
+    [...new Set([...seedBoundary, ...feedbackFiles, ...editableExploredFiles])],
+    index,
+  ).slice(0, feedback ? 12 : 8);
+  const readOnlyFiles = [
+    ...modelReadOnlyFiles,
+    ...fallback.readOnlyFiles,
+    ...exploredFiles.filter((file) => !candidateEditBoundary.includes(file)),
   ];
 
-  if (text.includes("profile")) {
-    for (const file of profileContextFiles) {
-      if (fs.existsSync(path.join(worktreePath, file)) && !supplemented.includes(file)) {
-        supplemented.push(file);
-      }
-    }
-  }
-
-  return supplemented;
+  return {
+    editBoundary: candidateEditBoundary,
+    readOnlyFiles: [...new Set(readOnlyFiles)].slice(0, 24),
+    exploration,
+    unconstrainedBoundary: seedBoundary,
+  };
 }
 
-async function locateModules(worktreePath, { requirementStage, runDir }) {
+async function locateModules(worktreePath, { requirementStage, runDir, feedback } = {}) {
   const requirementText = [
     requirementStage?.data?.title,
     requirementStage?.data?.userStory,
@@ -117,9 +119,10 @@ async function locateModules(worktreePath, { requirementStage, runDir }) {
   ]
     .filter(Boolean)
     .join("\n");
-  const index = selectCandidateFiles(worktreePath, requirementText);
+  const feedbackText = normalizeFeedback(feedback);
+  const locationText = [requirementText, feedbackText].filter(Boolean).join("\n\n失败反馈：\n");
+  const index = selectCandidateFiles(worktreePath, locationText);
   const allFiles = listSourceFiles(worktreePath);
-  const sourceFileSet = new Set(allFiles);
   const candidateSummary = index.files
     .map((item) => {
       const preview = item.preview.replace(/\s+/g, " ").slice(0, 500);
@@ -145,9 +148,11 @@ async function locateModules(worktreePath, { requirementStage, runDir }) {
             "请基于 PM 需求和候选源码文件，选择最小编辑边界。",
             "JSON 字段：editBoundary(string[]), readOnlyFiles(string[]), noEditAreas(string[]), rationale(string)。",
             "约束：editBoundary 只能选择候选文件中已经存在的源码文件；不要选择 node_modules、dist、package-lock、.env、迁移文件。",
+            "如果需求涉及路由、Tab、导航、API 调用链、组件复用，必须把对应入口、被调用服务、被渲染组件纳入 editBoundary 或 readOnlyFiles。",
             "",
             "PM 需求：",
             requirementText,
+            feedbackText ? ["", "上一次失败反馈：", feedbackText].join("\n") : "",
             "",
             "候选文件：",
             candidateSummary,
@@ -164,48 +169,41 @@ async function locateModules(worktreePath, { requirementStage, runDir }) {
   }
 
   const fallback = fallbackBoundary(index);
-  const editBoundary = normalizeFiles(worktreePath, modelDecision?.editBoundary, sourceFileSet);
-  const readOnlyFiles = normalizeFiles(worktreePath, modelDecision?.readOnlyFiles, sourceFileSet);
-  const unconstrainedBoundary = editBoundary.length > 0 ? editBoundary : fallback.editBoundary;
-  const constrainedEditBoundary = constrainEditBoundary({
-    editBoundary: unconstrainedBoundary,
+  const boundarySets = buildBoundarySets({
+    worktreePath,
     index,
+    modelDecision,
+    fallback,
+    allFiles,
     requirementText,
+    feedback,
   });
-  const finalEditBoundary = supplementEditBoundary({
-    editBoundary: constrainedEditBoundary,
-    worktreePath,
-    requirementText,
-  });
-  const finalReadOnlyFiles = supplementReadOnlyFiles({
-    readOnlyFiles: readOnlyFiles.length > 0 ? readOnlyFiles : fallback.readOnlyFiles,
-    worktreePath,
-    requirementText,
-  });
-  const relatedTests = existingTestsFor(finalEditBoundary, allFiles);
-  const files = [...new Set([...finalEditBoundary, ...finalReadOnlyFiles, ...relatedTests])]
+  const relatedTests = existingTestsFor(boundarySets.editBoundary, allFiles);
+  const files = [...new Set([...boundarySets.editBoundary, ...boundarySets.readOnlyFiles, ...relatedTests])]
     .map((file) => ({
       exists: fs.existsSync(path.join(worktreePath, file)),
       path: file,
-      role: finalEditBoundary.includes(file) ? "editable" : "context",
+      role: boundarySets.editBoundary.includes(file) ? "editable" : "context",
     }));
 
   return {
     name: "module_location",
-    status: finalEditBoundary.length > 0 ? "completed" : "blocked",
-    summary: `已基于需求动态定位 ${finalEditBoundary.length} 个可编辑文件。`,
+    status: boundarySets.editBoundary.length > 0 ? "completed" : "blocked",
+    summary: `已基于探索式边界定位 ${boundarySets.editBoundary.length} 个可编辑文件。`,
     data: {
       files,
       matchedDomains: index.matchedDomains,
       totalIndexedFiles: index.totalIndexedFiles,
-      editBoundary: finalEditBoundary,
-      primaryEditBoundary: finalEditBoundary,
-      readOnlyFiles: finalReadOnlyFiles,
+      editBoundary: boundarySets.editBoundary,
+      primaryEditBoundary: boundarySets.editBoundary,
+      readOnlyFiles: boundarySets.readOnlyFiles,
       relatedTests,
       allowedNewFilePrefixes,
       noEditAreas: modelDecision?.noEditAreas || fallback.noEditAreas,
       rationale: modelDecision?.rationale || fallback.rationale,
-      unconstrainedEditBoundary: unconstrainedBoundary,
+      exploration: boundarySets.exploration,
+      failureFeedback: feedback || null,
+      unconstrainedEditBoundary: boundarySets.unconstrainedBoundary,
       locatedBy: modelDecision?.modelError ? "heuristic_after_model_failure" : "model_with_index",
     },
   };

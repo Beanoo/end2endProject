@@ -29,6 +29,36 @@ function completeStage(runDir, stage) {
   return stage;
 }
 
+function buildReviewFeedback(reviewStage) {
+  const data = reviewStage?.data || {};
+  return {
+    reason: "code_review_reject",
+    summary: data.summary,
+    risks: data.risks || [],
+    requiredChanges: data.requiredChanges || [],
+    suggestions: data.suggestions || [],
+  };
+}
+
+function buildVerificationFeedback(verificationStage) {
+  const data = verificationStage?.data || {};
+  return {
+    reason: "verification_blocked",
+    summary: verificationStage?.summary,
+    test: data.test,
+    build: data.build,
+    backendSmoke: data.backendSmoke,
+  };
+}
+
+function buildCodeGenerationFeedback(error) {
+  return {
+    reason: "code_generation_failed",
+    error: error.message,
+    status: error.status || 500,
+  };
+}
+
 async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
   if (!requirement || !requirement.trim()) {
     const error = new Error("requirement is required");
@@ -68,99 +98,141 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
     gitWorktree.targetRelativePath = targetRelativePath || ".";
     writeEvent(runDir, { type: "worktree_created", gitWorktree });
 
-    const moduleStage = completeStage(
-      runDir,
-      await locateModules(worktreeTargetPath, { requirementStage, runDir }),
-    );
-    const codeStage = completeStage(
-      runDir,
-      await generateAndApplyPatch({
+    const stages = [requirementStage, planStage];
+    let feedback = null;
+    let finalAttempt = null;
+    const maxAttempts = 3;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      if (feedback) {
+        writeEvent(runDir, {
+          type: "boundary_retry_started",
+          attempt,
+          feedback,
+        });
+      }
+
+      const moduleStage = completeStage(
         runDir,
-        worktreePath: worktreeTargetPath,
-        gitRootPath: gitWorktree.path,
-        targetRelativePath,
-        requirementStage,
-        planStage,
-        moduleStage,
-      }),
-    );
-    const reviewStage = completeStage(
-      runDir,
-      await reviewGeneratedCode({
+        await locateModules(worktreeTargetPath, { requirementStage, runDir, feedback }),
+      );
+      stages.push(moduleStage);
+
+      let codeStage;
+      try {
+        codeStage = completeStage(
+          runDir,
+          await generateAndApplyPatch({
+            runDir,
+            worktreePath: worktreeTargetPath,
+            gitRootPath: gitWorktree.path,
+            targetRelativePath,
+            requirementStage,
+            planStage,
+            moduleStage,
+            feedback,
+          }),
+        );
+      } catch (error) {
+        if (attempt + 1 < maxAttempts) {
+          feedback = buildCodeGenerationFeedback(error);
+          continue;
+        }
+        throw error;
+      }
+      stages.push(codeStage);
+
+      const reviewStage = completeStage(
         runDir,
-        worktreePath: worktreeTargetPath,
-        gitRootPath: gitWorktree.path,
-        targetRelativePath,
-        requirementStage,
-        planStage,
-        moduleStage,
-        codeStage,
-      }),
-    );
-    if (reviewStage.data.verdict !== "pass") {
-      const result = {
-        runId,
-        status: "rejected_by_code_review",
-        requirement,
-        startedAt,
-        completedAt: new Date().toISOString(),
-        targetRepo: target,
-        repoStatus,
-        gitWorktree,
-        stages: [requirementStage, planStage, moduleStage, codeStage, reviewStage],
-        artifacts,
-      };
-      writeJson(runDir, "result.json", result);
-      writeDeliveryReport({ runDir, result });
-      writeEvent(runDir, { type: "run_completed", runId, status: result.status });
-      return result;
-    }
-    const testStage = completeStage(runDir, planTests({ moduleStage }));
-    const verificationStage = completeStage(
-      runDir,
-      await runVerification({
-        worktreePath: worktreeTargetPath,
-        gitRootPath: gitWorktree.path,
-        targetRelativePath,
-        targetRepo: target,
-        runDir,
-        moduleStage,
-      }),
-    );
-    if (verificationStage.status !== "completed") {
-      const result = {
-        runId,
-        status: "blocked_by_verification",
-        requirement,
-        startedAt,
-        completedAt: new Date().toISOString(),
-        targetRepo: target,
-        repoStatus,
-        gitWorktree,
-        stages: [
+        await reviewGeneratedCode({
+          runDir,
+          worktreePath: worktreeTargetPath,
+          gitRootPath: gitWorktree.path,
+          targetRelativePath,
           requirementStage,
           planStage,
           moduleStage,
           codeStage,
-          reviewStage,
-          testStage,
-          verificationStage,
-        ],
-        artifacts,
-      };
-      writeJson(runDir, "result.json", result);
-      writeDeliveryReport({ runDir, result });
-      writeEvent(runDir, { type: "run_completed", runId, status: result.status });
-      return result;
+        }),
+      );
+      stages.push(reviewStage);
+
+      if (reviewStage.data.verdict !== "pass") {
+        if (attempt + 1 < maxAttempts) {
+          feedback = buildReviewFeedback(reviewStage);
+          continue;
+        }
+        const result = {
+          runId,
+          status: "rejected_by_code_review",
+          requirement,
+          startedAt,
+          completedAt: new Date().toISOString(),
+          targetRepo: target,
+          repoStatus,
+          gitWorktree,
+          stages,
+          artifacts,
+        };
+        writeJson(runDir, "result.json", result);
+        writeDeliveryReport({ runDir, result });
+        writeEvent(runDir, { type: "run_completed", runId, status: result.status });
+        return result;
+      }
+
+      const testStage = completeStage(runDir, planTests({ moduleStage, codeStage }));
+      stages.push(testStage);
+      const verificationStage = completeStage(
+        runDir,
+        await runVerification({
+          worktreePath: worktreeTargetPath,
+          gitRootPath: gitWorktree.path,
+          targetRelativePath,
+          targetRepo: target,
+          runDir,
+          moduleStage,
+        }),
+      );
+      stages.push(verificationStage);
+
+      if (verificationStage.status !== "completed") {
+        if (attempt + 1 < maxAttempts) {
+          feedback = buildVerificationFeedback(verificationStage);
+          continue;
+        }
+        const result = {
+          runId,
+          status: "blocked_by_verification",
+          requirement,
+          startedAt,
+          completedAt: new Date().toISOString(),
+          targetRepo: target,
+          repoStatus,
+          gitWorktree,
+          stages,
+          artifacts,
+        };
+        writeJson(runDir, "result.json", result);
+        writeDeliveryReport({ runDir, result });
+        writeEvent(runDir, { type: "run_completed", runId, status: result.status });
+        return result;
+      }
+
+      finalAttempt = { moduleStage, codeStage, reviewStage };
+      break;
     }
+
+    const { moduleStage, codeStage, reviewStage } = finalAttempt;
     const deliveryStage = completeStage(
       runDir,
       packageDelivery({ gitWorktree, moduleStage, planStage, requirementStage, codeStage, reviewStage }),
     );
+    stages.push(deliveryStage);
     const knowledgeStage = completeStage(
       runDir,
       writeKnowledge({ targetRepo: target, gitWorktree, moduleStage }),
     );
+    stages.push(knowledgeStage);
 
     const result = {
       runId,
@@ -171,17 +243,7 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
       targetRepo: target,
       repoStatus,
       gitWorktree,
-      stages: [
-        requirementStage,
-        planStage,
-        moduleStage,
-        codeStage,
-        reviewStage,
-        testStage,
-        verificationStage,
-        deliveryStage,
-        knowledgeStage,
-      ],
+      stages,
       artifacts,
     };
 

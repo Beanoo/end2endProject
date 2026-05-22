@@ -37,6 +37,56 @@ function saveReviewDiff({ gitRootPath, targetRelativePath, runDir }) {
   return diff;
 }
 
+function readChangedFiles({ gitRootPath, targetRelativePath }) {
+  const pathspec = targetRelativePath || ".";
+  const output = execFileSync("git", ["diff", "--name-status", "--", pathspec], {
+    cwd: gitRootPath,
+    encoding: "utf8",
+  });
+  return output
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [status, file] = line.split(/\s+/, 2);
+      return { status, file };
+    });
+}
+
+function moduleToken(file) {
+  return path.basename(file, path.extname(file));
+}
+
+function deterministicReview({ worktreePath, changedFiles }) {
+  const addedFrontendFiles = changedFiles
+    .filter((item) => item.status === "A" && item.file.startsWith("frontend/src/"))
+    .map((item) => item.file);
+  const changedExistingFiles = changedFiles
+    .filter((item) => item.status !== "A")
+    .map((item) => item.file);
+
+  const orphanFiles = addedFrontendFiles.filter((file) => {
+    const token = moduleToken(file);
+    return !changedExistingFiles.some((changedFile) => {
+      const content = readFilePreview(worktreePath, changedFile, 20000);
+      return content.includes(token) || content.includes(file.replace(/^frontend\/src\//, "./"));
+    });
+  });
+
+  if (orphanFiles.length > 0) {
+    return {
+      verdict: "reject",
+      summary: `新增前端文件未被任何既有变更文件接入：${orphanFiles.join(", ")}`,
+      changedScope: changedFiles.map((item) => item.file),
+      estimatedImpact: "新增文件可能只是孤立源码，build 可通过但功能不会在真实页面或路由中生效。",
+      risks: ["存在未接入真实入口的新增前端文件，人工访问目标页面时可能看不到需求效果。"],
+      suggestions: ["在既有路由入口、页面组件或真实调用链中接入新增文件，或直接修改现有已接入文件。"],
+      requiredChanges: [`接入或移除孤立新增文件：${orphanFiles.join(", ")}`],
+    };
+  }
+
+  return null;
+}
+
 function buildReviewContext({ worktreePath, moduleStage, codeStage }) {
   const files = [
     ...(codeStage?.data?.touchedFiles || []),
@@ -77,6 +127,23 @@ async function reviewGeneratedCode({
   codeStage,
 }) {
   const diff = saveReviewDiff({ gitRootPath, targetRelativePath, runDir });
+  const changedFiles = readChangedFiles({ gitRootPath, targetRelativePath });
+  const deterministicRejection = deterministicReview({ worktreePath, changedFiles });
+  if (deterministicRejection) {
+    fs.writeFileSync(path.join(runDir, "code-review-raw.json"), JSON.stringify(deterministicRejection, null, 2));
+    fs.writeFileSync(path.join(runDir, "code-review.json"), JSON.stringify(deterministicRejection, null, 2));
+    return {
+      name: "code_review",
+      status: "blocked",
+      summary: `确定性 code review 拒绝：${deterministicRejection.summary}`,
+      data: {
+        ...deterministicRejection,
+        diffFile: "code-review-diff.patch",
+        rawFile: "code-review-raw.json",
+        reviewFile: "code-review.json",
+      },
+    };
+  }
   const context = buildReviewContext({ worktreePath, moduleStage, codeStage });
   const prompt = [
     "你是一个严格的 AI Code Review Agent，目标仓库是 Conduit/RealWorld 全栈博客。",

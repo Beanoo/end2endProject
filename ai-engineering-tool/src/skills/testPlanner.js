@@ -1,7 +1,9 @@
-function planTests({ moduleStage } = {}) {
+function planTests({ moduleStage, codeStage } = {}) {
   const editBoundary = moduleStage?.data?.editBoundary || [];
-  const touchesFrontend = editBoundary.some((file) => file.startsWith("frontend/"));
-  const touchesBackend = editBoundary.some((file) => file.startsWith("backend/"));
+  const touchedFiles = codeStage?.data?.touchedFiles || [];
+  const files = [...new Set([...editBoundary, ...touchedFiles])];
+  const touchesFrontend = files.some((file) => file.startsWith("frontend/"));
+  const touchesBackend = files.some((file) => file.startsWith("backend/"));
   const commands = ["npm run test"];
 
   if (touchesFrontend || !touchesBackend) {
