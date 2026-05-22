@@ -8,6 +8,7 @@ function writeDeliveryReport({ runDir, result }) {
   const codeReview = findLastStage("code_review");
   const moduleLocation = findLastStage("module_location");
   const touchedFiles = codeGeneration?.data?.touchedFiles || moduleLocation?.data?.editBoundary || [];
+  const writeAudit = codeGeneration?.data?.writeAudit || [];
   const report = `# AI 工程工具提测说明
 
 ## 需求
@@ -29,6 +30,10 @@ ${result.requirement || "未记录原始需求"}
 ## 变更文件
 
 ${touchedFiles.map((file) => `- ${file}`).join("\n") || "- 未记录"}
+
+## 写入审计
+
+${writeAudit.map((item) => `- ${item.file}: ${item.classification}${item.requiresHumanAttention ? "（需关注）" : ""}${item.explorationReason ? `；原因：${item.explorationReason}` : ""}`).join("\n") || "- 未记录"}
 
 ## LLM Code Review
 

@@ -1,0 +1,2 @@
+error: patch failed: frontend/src/components/AuthPageContainer/AuthPageContainer.jsx:7
+error: frontend/src/components/AuthPageContainer/AuthPageContainer.jsx: patch does not apply

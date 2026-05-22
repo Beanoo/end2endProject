@@ -5,10 +5,12 @@ const { chatCompletion } = require("../llm/arkClient");
 const { readFilePreview } = require("../repoIndex");
 
 const defaultAllowedNewFilePrefixes = [
+  "frontend/src/",
   "frontend/src/components/",
   "frontend/src/helpers/",
   "frontend/src/routes/",
   "frontend/src/services/",
+  "backend/",
   "backend/controllers/",
   "backend/helper/",
   "backend/routes/",
@@ -126,6 +128,28 @@ function isAllowed(file, allowedFiles, allowedNewFilePrefixes) {
   if (isBlocked(file)) return false;
   if (allowedFiles.includes(file)) return true;
   return allowedNewFilePrefixes.some((prefix) => file.startsWith(prefix));
+}
+
+function auditTouchedFiles(touchedFiles, moduleStage) {
+  const data = moduleStage?.data || {};
+  const editBoundary = new Set(data.editBoundary || []);
+  const readOnlyFiles = new Set(data.readOnlyFiles || []);
+  const explorationReasons = new Map((data.exploration || []).map((item) => [item.file, item.reason]));
+  const allowedRoots = data.writePolicy?.allowedExistingSourceRoots || ["frontend/src/", "backend/"];
+
+  return touchedFiles.map((file) => {
+    let classification = "outside_initial_boundary";
+    if (editBoundary.has(file)) classification = "planned_edit_boundary";
+    else if (readOnlyFiles.has(file)) classification = "promoted_from_read_context";
+    else if (allowedRoots.some((root) => file.startsWith(root))) classification = "audited_source_expansion";
+
+    return {
+      file,
+      classification,
+      explorationReason: explorationReasons.get(file) || null,
+      requiresHumanAttention: classification !== "planned_edit_boundary",
+    };
+  });
 }
 
 function validatePatch(patch, boundary) {
@@ -302,13 +326,16 @@ async function askForPatch({ runDir, purpose, requirementText, planStage, module
     JSON.stringify(planStage?.data || {}, null, 2),
     feedback ? ["", "上一次失败反馈：", formatFeedback(feedback)].join("\n") : "",
     "",
-    "可修改的既有文件：",
+    "建议优先修改的文件（不是唯一可修改范围）：",
     boundary.allowedFiles.map((file) => `- ${file}`).join("\n") || "- 无",
     "",
-    "允许新增文件的目录前缀：",
+    "Audited Write Policy:",
+    "你可以修改 frontend/src/ 与 backend/ 下的源码文件，但每个超出建议边界的修改都会被审计；必须保持最小必要改动。",
+    "禁止修改 node_modules、dist/build、package.json、package-lock.json、.env、backend/migrations、backend/seeders。",
+    "",
+    "允许新增文件的源码目录前缀：",
     boundary.allowedNewFilePrefixes.map((prefix) => `- ${prefix}`).join("\n"),
     "",
-    "禁止修改：node_modules、dist/build、package.json、package-lock.json、.env、迁移和 seed 文件。",
     "禁止发明未出现在相关文件上下文里的 import、service、helper 或组件；需要接口数据时优先复用上下文中已有服务。",
     "如果需要测试，优先新增或修改与变更逻辑直接相关的轻量测试文件。",
     "",
@@ -344,7 +371,7 @@ async function askForFileWrites({ runDir, requirementText, planStage, moduleStag
     '{"files":[{"path":"frontend/src/example.jsx","content":"完整文件内容"}]}',
     "",
     "硬性约束：",
-    "1. path 只能是“可修改的既有文件”，或位于“允许新增文件的目录前缀”下。",
+    "1. path 必须位于 frontend/src/ 或 backend/ 源码区内，且不能触碰硬禁止文件。",
     "2. content 必须是该文件的完整最终内容，不是 diff，不是片段。",
     "3. 既有文件必须基于下方“相关文件上下文”改写，不能假设另一个版本的源码。",
     "4. 禁止发明未出现在相关文件上下文里的 import、service、helper 或组件；需要接口数据时优先复用上下文中已有服务。",
@@ -360,10 +387,14 @@ async function askForFileWrites({ runDir, requirementText, planStage, moduleStag
     JSON.stringify(planStage?.data || {}, null, 2),
     feedback ? ["", "上一次失败反馈：", formatFeedback(feedback)].join("\n") : "",
     "",
-    "可修改的既有文件：",
+    "建议优先修改的文件（不是唯一可修改范围）：",
     boundary.allowedFiles.map((file) => `- ${file}`).join("\n") || "- 无",
     "",
-    "允许新增文件的目录前缀：",
+    "Audited Write Policy:",
+    "可以修改 frontend/src/ 与 backend/ 下的源码文件，但每个超出建议边界的修改都会被审计；必须保持最小必要改动。",
+    "禁止修改 node_modules、dist/build、package.json、package-lock.json、.env、backend/migrations、backend/seeders。",
+    "",
+    "允许新增文件的源码目录前缀：",
     boundary.allowedNewFilePrefixes.map((prefix) => `- ${prefix}`).join("\n"),
     "",
     "最后一次失败 patch:",
@@ -431,6 +462,15 @@ function savePatch(runDir, name, patch) {
   fs.writeFileSync(path.join(runDir, name), patch);
 }
 
+function getCumulativeTouchedFiles({ gitRootPath, targetRelativePath }) {
+  const pathspec = targetRelativePath || ".";
+  const output = execFileSync("git", ["diff", "--name-only", "--", pathspec], {
+    cwd: gitRootPath,
+    encoding: "utf8",
+  });
+  return output.split("\n").filter(Boolean);
+}
+
 async function generateAndApplyPatch({
   runDir,
   worktreePath,
@@ -447,6 +487,7 @@ async function generateAndApplyPatch({
   let previous = null;
   let appliedBy = null;
   let touchedFiles = [];
+  let writeAudit = [];
   const attempts = [];
 
   if (boundary.allowedFiles.length === 0) {
@@ -474,6 +515,7 @@ async function generateAndApplyPatch({
     try {
       touchedFiles = validatePatch(patch, boundary);
       const applyMethod = applyPatchWithFallbacks({ gitRootPath, targetRelativePath, patch });
+      writeAudit = auditTouchedFiles(touchedFiles, moduleStage);
       appliedBy = attempt === 0 ? "model_patch" : `model_patch_repair_${attempt}`;
       attempts.push({ patchFile, status: "applied", touchedFiles, applyMethod });
       break;
@@ -497,6 +539,7 @@ async function generateAndApplyPatch({
     });
     fs.writeFileSync(path.join(runDir, "model-file-rewrite.json"), JSON.stringify(fileWrites, null, 2));
     touchedFiles = applyFileWrites({ worktreePath, boundary, fileWrites });
+    writeAudit = auditTouchedFiles(touchedFiles, moduleStage);
     appliedBy = "model_file_rewrite_fallback";
     attempts.push({
       patchFile: "model-file-rewrite.json",
@@ -504,6 +547,12 @@ async function generateAndApplyPatch({
       touchedFiles,
       applyMethod: "file_rewrite",
     });
+  }
+
+  const cumulativeTouchedFiles = getCumulativeTouchedFiles({ gitRootPath, targetRelativePath });
+  if (cumulativeTouchedFiles.length > 0) {
+    touchedFiles = cumulativeTouchedFiles;
+    writeAudit = auditTouchedFiles(touchedFiles, moduleStage);
   }
 
   return {
@@ -516,6 +565,7 @@ async function generateAndApplyPatch({
       appliedBy,
       attempts,
       touchedFiles,
+      writeAudit,
       requirementTitle: requirementStage.data.title || requirementStage.data.normalizedTitle,
     },
   };

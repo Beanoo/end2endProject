@@ -1,0 +1,14 @@
+diff --git a/frontend/src/components/AuthPageContainer/AuthPageContainer.jsx b/frontend/src/components/AuthPageContainer/AuthPageContainer.jsx
+--- a/frontend/src/components/AuthPageContainer/AuthPageContainer.jsx
++++ b/frontend/src/components/AuthPageContainer/AuthPageContainer.jsx
+@@ -6,6 +6,9 @@ function AuthPageContainer({ children, error, path, text, title, subtitle }) {
+     <div className="auth-page">
+       <ContainerRow type="page">
+         <div className="col-md-6 offset-md-3 col-xs-12">
+           <h1 className="text-xs-center">{title}</h1>
++          {subtitle && (
++            <p className="text-xs-center text-muted">{subtitle}</p>
++          )}
+           <p className="text-xs-center">
+             <Link to={path}>{text}</Link>
+           </p>
