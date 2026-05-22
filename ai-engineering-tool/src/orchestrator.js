@@ -127,6 +127,32 @@ async function runWorkflow({ requirement, targetRepo = defaultTargetRepo }) {
         moduleStage,
       }),
     );
+    if (verificationStage.status !== "completed") {
+      const result = {
+        runId,
+        status: "blocked_by_verification",
+        requirement,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        targetRepo: target,
+        repoStatus,
+        gitWorktree,
+        stages: [
+          requirementStage,
+          planStage,
+          moduleStage,
+          codeStage,
+          reviewStage,
+          testStage,
+          verificationStage,
+        ],
+        artifacts,
+      };
+      writeJson(runDir, "result.json", result);
+      writeDeliveryReport({ runDir, result });
+      writeEvent(runDir, { type: "run_completed", runId, status: result.status });
+      return result;
+    }
     const deliveryStage = completeStage(
       runDir,
       packageDelivery({ gitWorktree, moduleStage, planStage, requirementStage, codeStage, reviewStage }),

@@ -1,0 +1,87 @@
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+--- /dev/null
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -0,0 +1,33 @@
++import { useEffect, useState } from "react";
++import { useParams } from "react-router-dom";
++import { useAuth } from "../../context/AuthContext";
++import getProfile from "../../services/getProfile";
++
++function ProfileAboutMe() {
++  const { username } = useParams();
++  const { headers } = useAuth();
++  const [bio, setBio] = useState("");
++  const [loading, setLoading] = useState(true);
++
++  useEffect(() => {
++    setLoading(true);
++    getProfile({ headers, username })
++      .then((profile) => {
++        setBio(profile?.bio || "");
++        setLoading(false);
++      })
++      .catch(() => setLoading(false));
++  }, [username, headers]);
++
++  if (loading) {
++    return <div className="article-preview"><em>Loading about me...</em></div>;
++  }
++
++  return (
++    <div className="col-xs-12">
++      <div style={{ whiteSpace: "pre-wrap", lineHeight: "1.6", padding: "1rem 0" }}>
++        {bio?.trim() ? bio : "该用户暂未填写个人简介"}
++      </div>
++    </div>
++  );
++}
++
++export default ProfileAboutMe;
+diff --git a/frontend/src/routes/Profile/Profile.jsx b/frontend/src/routes/Profile/Profile.jsx
+--- a/frontend/src/routes/Profile/Profile.jsx
++++ b/frontend/src/routes/Profile/Profile.jsx
+@@ -12,6 +12,7 @@ function Profile() {
+           <div className="articles-toggle">
+             <ul className="nav nav-pills outline-active">
+               <NavItem text="My Articles" url="" state={state} />
+               <NavItem text="Favorited Articles" url="favorites" state={state} />
++              <NavItem text="About Me" url="about-me" state={state} />
+             </ul>
+           </div>
+           <Outlet />
+diff --git a/frontend/src/main.jsx b/frontend/src/main.jsx
+--- a/frontend/src/main.jsx
++++ b/frontend/src/main.jsx
+@@ -11,6 +11,7 @@ import Article from "./routes/Article/Article";
+ import CommentsSection from "./routes/Article/CommentsSection";
+ import ArticleEditor from "./routes/ArticleEditor";
+ import Home from "./routes/Home";
+ import HomeArticles from "./routes/HomeArticles";
+ import Login from "./routes/Login";
+ import NotFound from "./routes/NotFound";
+ import Profile from "./routes/Profile/Profile";
+ import ProfileArticles from "./routes/Profile/ProfileArticles";
+ import ProfileFavArticles from "./routes/Profile/ProfileFavArticles";
++import ProfileAboutMe from "./routes/Profile/ProfileAboutMe";
+ import Settings from "./routes/Settings";
+ import SignUp from "./routes/SignUp";
+ 
+@@ -39,6 +40,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
+             <Route path="profile/:username" element={<Profile />}>
+               <Route index element={<ProfileArticles />} />
+               <Route path="favorites" element={<ProfileFavArticles />} />
++              <Route path="about-me" element={<ProfileAboutMe />} />
+             </Route>
+           </Routes>
+         </Route>
+         <Route path="*" element={<NotFound />} />
+       </Routes>
+     </HashRouter>
+   </AuthProvider>
+ </React.StrictMode>,
+ );
+ 
+ // If you want to start measuring performance in your app, pass a function
+ // to log results (for example: reportWebVitals(console.log))
+ // or send to an analytics endpoint. Learn more: https://bit.ly/CRA-vitals
+ reportWebVitals();

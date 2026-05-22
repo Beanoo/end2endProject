@@ -1,0 +1,31 @@
+diff --git a/frontend/src/components/AuthPageContainer/AuthPageContainer.jsx b/frontend/src/components/AuthPageContainer/AuthPageContainer.jsx
+index b4f3286..12b3c2e 100644
+--- a/frontend/src/components/AuthPageContainer/AuthPageContainer.jsx
++++ b/frontend/src/components/AuthPageContainer/AuthPageContainer.jsx
+@@ -1,12 +1,13 @@
+ import { Link } from "react-router-dom";
+ import ContainerRow from "../ContainerRow";
+ 
+-function AuthPageContainer({ children, error, path, text, title }) {
++function AuthPageContainer({ children, error, path, text, title, subtitle }) {
+   return (
+     <div className="auth-page">
+       <ContainerRow type="page">
+         <div className="col-md-6 offset-md-3 col-xs-12">
+           <h1 className="text-xs-center">{title}</h1>
++          {subtitle && <p className="text-xs-center text-muted mb-3">{subtitle}</p>}
+           <p className="text-xs-center">
+             <Link to={path}>{text}</Link>
+           </p>
+diff --git a/frontend/src/routes/Login.jsx b/frontend/src/routes/Login.jsx
+index dd3c226..4846c24 100644
+--- a/frontend/src/routes/Login.jsx
++++ b/frontend/src/routes/Login.jsx
+@@ -13,6 +13,7 @@ function Login() {
+     <AuthPageContainer
+       error={errorMessage}
+       path="/register"
++      subtitle="欢迎回到 Conduit"
+       text="Need an account?"
+       title="Sign in"
+     >

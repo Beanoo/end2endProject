@@ -1,0 +1,13 @@
+
+ RUN  v4.0.18 /Users/doumengyao/work/end2endProject/ai-engineering-tool/workspace/worktrees/run_20260522152809054_iyva1o
+
+ ✓ backend/helper/helpers.test.js (6 tests) 2ms
+ ✓ frontend/src/helpers/articleStats.test.js (3 tests) 3ms
+ ✓ frontend/src/helpers/errorHandler.test.js (5 tests) 3ms
+ ✓ frontend/src/helpers/dateFormatter.test.js (1 test) 13ms
+
+ Test Files  4 passed (4)
+      Tests  15 passed (15)
+   Start at  23:30:17
+   Duration  522ms (transform 50ms, setup 0ms, import 75ms, tests 21ms, environment 1.55s)
+

@@ -1,0 +1,86 @@
+diff --git a/frontend/src/main.jsx b/frontend/src/main.jsx
+index 77007ee..f85c7e4 100644
+--- a/frontend/src/main.jsx
++++ b/frontend/src/main.jsx
+@@ -16,6 +16,7 @@ import NotFound from "./routes/NotFound";
+ import Profile from "./routes/Profile/Profile";
+ import ProfileArticles from "./routes/Profile/ProfileArticles";
+ import ProfileFavArticles from "./routes/Profile/ProfileFavArticles";
++import ProfileAboutMe from "./routes/Profile/ProfileAboutMe";
+ import Settings from "./routes/Settings";
+ import SignUp from "./routes/SignUp";
+ 
+@@ -45,6 +46,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
+             <Route path="profile/:username" element={<Profile />}>
+               <Route index element={<ProfileArticles />} />
+               <Route path="favorites" element={<ProfileFavArticles />} />
++              <Route path="about" element={<ProfileAboutMe />} />
+             </Route>
+           </Route>
+           <Route path="*" element={<NotFound />} />
+@@ -52,7 +54,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
+       </AuthProvider>
+     </HashRouter>
+   </React.StrictMode>,
+-  );
++);
+ 
+ // If you want to start measuring performance in your app, pass a function
+ // to log results (for example: reportWebVitals(console.log))
+diff --git a/frontend/src/routes/Profile/Profile.jsx b/frontend/src/routes/Profile/Profile.jsx
+index 6b30fdc..455325c 100644
+--- a/frontend/src/routes/Profile/Profile.jsx
++++ b/frontend/src/routes/Profile/Profile.jsx
+@@ -20,6 +20,7 @@ function Profile() {
+             <ul className="nav nav-pills outline-active">
+               <NavItem text="My Articles" url="" state={state} />
+               <NavItem text="Favorited Articles" url="favorites" state={state} />
++              <NavItem text="About Me" url="about" state={state} />
+             </ul>
+           </div>
+           <Outlet />
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+new file mode 100644
+index 0000000..1e494e7
+--- /dev/null
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -0,0 +1,39 @@
++import { useState, useEffect } from "react";
++import { useParams } from "react-router-dom";
++import agent from "../../services/agent";
++
++function ProfileAboutMe() {
++  const { username } = useParams();
++  const [profile, setProfile] = useState(null);
++  const [loading, setLoading] = useState(true);
++
++  useEffect(() => {
++    setLoading(true);
++    agent.Profile.get(username).then(res => {
++      setProfile(res.profile);
++      setLoading(false);
++    });
++  }, [username]);
++
++  if (loading) {
++    return (
++      <div className="article-preview">
++        <em>Loading profile info...</em>
++      </div>
++    );
++  }
++
++  const bio = profile?.bio;
++
++  return (
++    <div className="about-me-content" style={{ whiteSpace: "pre-wrap", padding: "1rem 0" }}>
++      {!bio || bio.trim() === "" ? (
++        <p className="text-muted">该用户暂未填写个人简介</p>
++      ) : (
++        <p>{bio}</p>
++      )}
++    </div>
++  );
++}
++
++export default ProfileAboutMe;

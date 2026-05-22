@@ -1,0 +1,20 @@
+{
+  "pattern": "conduit dynamic requirement delivery",
+  "targetRepo": "/Users/doumengyao/work/Conduiteg",
+  "matchedDomains": [
+    "article",
+    "profile",
+    "auth",
+    "settings",
+    "tag"
+  ],
+  "reusableFiles": [
+    "frontend/src/routes/Profile/Profile.jsx",
+    "frontend/src/main.jsx"
+  ],
+  "editBoundary": [
+    "frontend/src/routes/Profile/Profile.jsx",
+    "frontend/src/main.jsx"
+  ],
+  "nextStep": "P2 should index this knowledge for future module-location retrieval."
+}

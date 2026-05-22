@@ -1,0 +1,70 @@
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+new file mode 100644
+diff --git a//dev/null b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+--- a//dev/null
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -0,0 +1,18 @@
++import { useOutletContext } from "react-router-dom";
++
++function ProfileAboutMe() {
++  const { profile } = useOutletContext();
++  const bio = profile?.bio?.trim();
++
++  return (
++    <div className="profile-about-section">
++      {bio ? (
++        <div className="article-preview" style={{ whiteSpace: "pre-line" }}>
++          {bio}
++        </div>
++      ) : (
++        <div className="article-preview">
++          该用户暂未填写个人简介
++        </div>
++      )}
++    </div>
++  );
++}
++
++export default ProfileAboutMe;
+diff --git a/frontend/src/routes/Profile/index.jsx b/frontend/src/routes/Profile/index.jsx
+--- a/frontend/src/routes/Profile/index.jsx
++++ b/frontend/src/routes/Profile/index.jsx
+@@ -1,5 +1,6 @@
+ import { useEffect, useState } from "react";
+ import { NavLink, Outlet, useParams } from "react-router-dom";
++import ProfileAboutMe from "./ProfileAboutMe";
+ import FollowButton from "../../components/FollowButton";
+ import Avatar from "../../components/Avatar";
+ import { useAuth } from "../../context/AuthContext";
+@@ -54,6 +55,11 @@ function Profile() {
+             Favorited Articles
+           </NavLink>
+         </li>
++        <li className="nav-item">
++          <NavLink to={`/profile/${username}/about-me`} className="nav-link">
++            About Me
++          </NavLink>
++        </li>
+       </ul>
+       <Outlet context={{ profile }} />
+     </div>
+diff --git a/frontend/src/routes/App.jsx b/frontend/src/routes/App.jsx
+--- a/frontend/src/routes/App.jsx
++++ b/frontend/src/routes/App.jsx
+@@ -1,6 +1,7 @@
+ import Home from "./Home";
+ import Login from "./Login";
+ import Profile from "./Profile";
++import ProfileAboutMe from "./Profile/ProfileAboutMe";
+ import ProfileArticles from "./Profile/ProfileArticles";
+ import ProfileFavArticles from "./Profile/ProfileFavArticles";
+ import Register from "./Register";
+@@ -47,6 +48,7 @@ function App() {
+                 element={<Profile />}
+                 children={[
+                   { index: true, element: <ProfileArticles /> },
+                   { path: "favorites", element: <ProfileFavArticles /> },
++                  { path: "about-me", element: <ProfileAboutMe /> },
+                 ]}
+               />,
+             ]}

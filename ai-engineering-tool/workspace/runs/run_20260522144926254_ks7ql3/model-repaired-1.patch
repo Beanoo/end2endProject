@@ -1,0 +1,35 @@
+diff --git a/frontend/src/routes/Profile/Profile.jsx b/frontend/src/routes/Profile/Profile.jsx
+--- a/frontend/src/routes/Profile/Profile.jsx
++++ b/frontend/src/routes/Profile/Profile.jsx
+@@ -13,6 +13,7 @@ function Profile() {
+         <div className="col-xs-12 col-md-10 offset-md-1">
+           <div className="articles-toggle">
+             <ul className="nav nav-pills outline-active">
++              <NavItem text="About Me" url="about-me" state={state} />
+               <NavItem text="My Articles" url="" state={state} />
+               <NavItem text="Favorited Articles" url="favorites" state={state} />
+             </ul>
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+new file mode 100644
+diff --git a//dev/null b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+--- a//dev/null
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -0,0 +1,16 @@
++import { useLocation } from "react-router-dom";
++
++function ProfileAboutMe() {
++  const { state } = useLocation();
++  const userBio = state?.bio;
++
++  return (
++    <div className="article-preview">
++      {userBio && userBio.trim() ? (
++        <p className="text-muted">{userBio}</p>
++      ) : (
++        <em>This user hasn't written a personal bio yet.</em>
++      )}
++    </div>
++  );
++}
++
++export default ProfileAboutMe;

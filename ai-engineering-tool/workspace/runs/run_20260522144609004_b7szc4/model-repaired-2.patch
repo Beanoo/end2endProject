@@ -1,0 +1,149 @@
+diff --git a/backend/routes/profiles.js b/backend/routes/profiles.js
+--- a/backend/routes/profiles.js
++++ b/backend/routes/profiles.js
+@@ -2,7 +2,7 @@ const express = require("express");
+ const router = express.Router();
+ const verifyToken = require("../middleware/authentication");
+ const { getProfile, followToggler } = require("../controllers/profiles");
+ 
+-//? Profile
+-router.get("/:username", verifyToken, getProfile);
++//? Public Profile (guest access allowed)
++router.get("/:username", getProfile);
+ 
+ //* Follow Profile
+ router.post("/:username/follow", verifyToken, followToggler);
+diff --git a/backend/controllers/profiles.js b/backend/controllers/profiles.js
+--- a/backend/controllers/profiles.js
++++ b/backend/controllers/profiles.js
+@@ -7,7 +7,7 @@ const getProfile = async (req, res, next) => {
+   try {
+     const { loggedUser } = req;
+     const { username } = req.params;
+-
++    // Allow guest access, no logged user required
+     const profile = await User.findOne({
+       where: { username: username },
+       attributes: { exclude: "email" },
+@@ -15,7 +15,7 @@ const getProfile = async (req, res, next) => {
+     if (!profile) throw new NotFoundError("User profile");
+ 
+     await appendFollowers(loggedUser, profile);
+-
++    // Bio field is already included in User model, no extra fields needed
+     res.json({ profile });
+   } catch (error) {
+     next(error);
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+new file mode 100644
+diff --git a//dev/null b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+--- a//dev/null
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -0,0 +1,22 @@
++import { useOutletContext } from "react-router-dom";
++
++function ProfileAboutMe() {
++  const { profile } = useOutletContext();
++  const { bio } = profile || {};
++
++  return (
++    <div className="profile-about-section">
++      <div className="article-preview">
++        {bio && bio.trim() ? (
++          <p className="about-me-content" style={{ whiteSpace: "pre-line" }}>
++            {bio}
++          </p>
++        ) : (
++          <p className="text-muted">该用户暂未填写个人简介</p>
++        )}
++      </div>
++    </div>
++  );
++}
++
++export default ProfileAboutMe;
+diff --git a/frontend/src/routes/Profile/Profile.jsx b/frontend/src/routes/Profile/Profile.jsx
+--- a/frontend/src/routes/Profile/Profile.jsx
++++ b/frontend/src/routes/Profile/Profile.jsx
+@@ -1,4 +1,5 @@
+ import { useEffect, useState } from "react";
++import { NavLink, Outlet, useParams } from "react-router-dom";
+ import { useAuth } from "../../context/AuthContext";
+ import FollowButton from "../../components/FollowButton";
+ import getProfile from "../../services/getProfile";
+@@ -10,6 +11,7 @@ function Profile() {
+   const [profile, setProfile] = useState(null);
+   const [loading, setLoading] = useState(true);
+   const { headers, loggedUser } = useAuth();
++  const { username } = useParams();
+ 
+   useEffect(() => {
+     setLoading(true);
+@@ -30,6 +32,28 @@ function Profile() {
+         </div>
+       </div>
+ 
++      <ul className="nav nav-pills outline-active">
++        <li className="nav-item">
++          <NavLink
++            className="nav-link"
++            to={`/profile/${username}/about-me`}
++          >
++            About Me
++          </NavLink>
++        </li>
++        <li className="nav-item">
++          <NavLink
++            end
++            className="nav-link"
++            to={`/profile/${username}`}
++          >
++            My Articles
++          </NavLink>
++        </li>
++        <li className="nav-item">
++          <NavLink
++            className="nav-link"
++            to={`/profile/${username}/favorites`}
++          >
++            Favorited Articles
++          </NavLink>
++        </li>
++      </ul>
++
++      <Outlet context={{ profile }} />
+     </>
+   );
+ }
+ 
+ export default Profile;
+diff --git a/frontend/src/routes/index.jsx b/frontend/src/routes/index.jsx
+--- a/frontend/src/routes/index.jsx
++++ b/frontend/src/routes/index.jsx
+@@ -1,3 +1,4 @@
++import ProfileAboutMe from "./Profile/ProfileAboutMe";
+ import ProfileArticles from "./Profile/ProfileArticles";
+ import ProfileFavArticles from "./Profile/ProfileFavArticles";
+ import Profile from "./Profile/Profile";
+@@ -45,6 +46,10 @@ const router = createBrowserRouter([
+         path: "/profile/:username",
+         element: <Profile />,
+         children: [
++          {
++            path: "about-me",
++            element: <ProfileAboutMe />,
++          },
+           {
+             index: true,
+             element: <ProfileArticles />,
+           },
+           {
+             path: "favorites",
+             element: <ProfileFavArticles />,
+           }
+         ]
+       },
+     ]
+   }
+ ]);
+ export default router;

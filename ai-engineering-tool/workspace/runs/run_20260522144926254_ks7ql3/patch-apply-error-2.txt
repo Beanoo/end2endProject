@@ -1,0 +1,1 @@
+error: invalid path '/dev/null'

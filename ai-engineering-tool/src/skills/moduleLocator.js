@@ -70,6 +70,44 @@ function constrainEditBoundary({ editBoundary, index, requirementText }) {
   return rankBoundaryByIndex(candidates, index).slice(0, 2);
 }
 
+function needsFrontendRouteBoundary(requirementText) {
+  const text = String(requirementText || "").toLowerCase();
+  const routeSignals = ["tab", "route", "页面", "子路由", "导航", "nav", "about me", "favorited articles"];
+  return text.includes("profile") && routeSignals.some((term) => text.includes(term));
+}
+
+function supplementEditBoundary({ editBoundary, worktreePath, requirementText }) {
+  const supplemented = [...editBoundary];
+  const routeRegistry = "frontend/src/main.jsx";
+  if (
+    needsFrontendRouteBoundary(requirementText) &&
+    fs.existsSync(path.join(worktreePath, routeRegistry)) &&
+    !supplemented.includes(routeRegistry)
+  ) {
+    supplemented.push(routeRegistry);
+  }
+  return supplemented;
+}
+
+function supplementReadOnlyFiles({ readOnlyFiles, worktreePath, requirementText }) {
+  const supplemented = [...readOnlyFiles];
+  const text = String(requirementText || "").toLowerCase();
+  const profileContextFiles = [
+    "frontend/src/components/AuthorInfo/AuthorInfo.jsx",
+    "frontend/src/services/getProfile.js",
+  ];
+
+  if (text.includes("profile")) {
+    for (const file of profileContextFiles) {
+      if (fs.existsSync(path.join(worktreePath, file)) && !supplemented.includes(file)) {
+        supplemented.push(file);
+      }
+    }
+  }
+
+  return supplemented;
+}
+
 async function locateModules(worktreePath, { requirementStage, runDir }) {
   const requirementText = [
     requirementStage?.data?.title,
@@ -129,13 +167,23 @@ async function locateModules(worktreePath, { requirementStage, runDir }) {
   const editBoundary = normalizeFiles(worktreePath, modelDecision?.editBoundary, sourceFileSet);
   const readOnlyFiles = normalizeFiles(worktreePath, modelDecision?.readOnlyFiles, sourceFileSet);
   const unconstrainedBoundary = editBoundary.length > 0 ? editBoundary : fallback.editBoundary;
-  const finalEditBoundary = constrainEditBoundary({
+  const constrainedEditBoundary = constrainEditBoundary({
     editBoundary: unconstrainedBoundary,
     index,
     requirementText,
   });
+  const finalEditBoundary = supplementEditBoundary({
+    editBoundary: constrainedEditBoundary,
+    worktreePath,
+    requirementText,
+  });
+  const finalReadOnlyFiles = supplementReadOnlyFiles({
+    readOnlyFiles: readOnlyFiles.length > 0 ? readOnlyFiles : fallback.readOnlyFiles,
+    worktreePath,
+    requirementText,
+  });
   const relatedTests = existingTestsFor(finalEditBoundary, allFiles);
-  const files = [...new Set([...finalEditBoundary, ...readOnlyFiles, ...relatedTests])]
+  const files = [...new Set([...finalEditBoundary, ...finalReadOnlyFiles, ...relatedTests])]
     .map((file) => ({
       exists: fs.existsSync(path.join(worktreePath, file)),
       path: file,
@@ -152,7 +200,7 @@ async function locateModules(worktreePath, { requirementStage, runDir }) {
       totalIndexedFiles: index.totalIndexedFiles,
       editBoundary: finalEditBoundary,
       primaryEditBoundary: finalEditBoundary,
-      readOnlyFiles: readOnlyFiles.length > 0 ? readOnlyFiles : fallback.readOnlyFiles,
+      readOnlyFiles: finalReadOnlyFiles,
       relatedTests,
       allowedNewFilePrefixes,
       noEditAreas: modelDecision?.noEditAreas || fallback.noEditAreas,

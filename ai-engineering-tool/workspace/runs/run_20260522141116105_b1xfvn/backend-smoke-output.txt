@@ -1,0 +1,7 @@
+
+> backend@1.0.0 dev
+> node --watch index.js
+
+[dotenv@17.3.1] injecting env (19) from .env -- tip: ⚙️  suppress all logs with { quiet: true }
+Server running on http://localhost:3254
+Connection with development database has been established.

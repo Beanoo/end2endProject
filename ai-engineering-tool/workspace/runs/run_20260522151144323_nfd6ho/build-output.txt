@@ -1,0 +1,23 @@
+
+> frontend@0.1.0 build
+> vite build
+
+vite v7.3.1 building client environment for production...
+transforming...
+✓ 58 modules transformed.
+
+✗ Build failed in 607ms
+error during build:
+Could not resolve "../../services/agent" from "src/routes/Profile/ProfileAboutMe.jsx"
+file: /Users/doumengyao/work/end2endProject/ai-engineering-tool/workspace/worktrees/run_20260522151144323_nfd6ho/frontend/src/routes/Profile/ProfileAboutMe.jsx
+    at getRollupError (file:///Users/doumengyao/work/Conduiteg/node_modules/rollup/dist/es/shared/parseAst.js:402:41)
+    at error (file:///Users/doumengyao/work/Conduiteg/node_modules/rollup/dist/es/shared/parseAst.js:398:42)
+    at ModuleLoader.handleInvalidResolvedId (file:///Users/doumengyao/work/Conduiteg/node_modules/rollup/dist/es/shared/node-entry.js:21710:24)
+    at file:///Users/doumengyao/work/Conduiteg/node_modules/rollup/dist/es/shared/node-entry.js:21670:26
+npm error Lifecycle script `build` failed with error:
+npm error code 1
+npm error path /Users/doumengyao/work/end2endProject/ai-engineering-tool/workspace/worktrees/run_20260522151144323_nfd6ho/frontend
+npm error workspace frontend@0.1.0
+npm error location /Users/doumengyao/work/end2endProject/ai-engineering-tool/workspace/worktrees/run_20260522151144323_nfd6ho/frontend
+npm error command failed
+npm error command sh -c vite build

@@ -33,7 +33,7 @@ const domainHints = [
   },
   {
     name: "profile",
-    terms: ["profile", "profiles", "个人主页", "资料", "关注", "作者"],
+    terms: ["profile", "profiles", "about me", "bio", "tab", "个人主页", "资料", "简介", "关注", "作者"],
     paths: ["Profile", "profiles", "Follow", "Author"],
   },
   {
@@ -157,6 +157,13 @@ function scoreFile({ file, content, terms, matchedDomains }) {
     file === "frontend/src/routes/SignUp.jsx"
   ) {
     score += 30;
+  }
+  if (
+    matchedDomains.some((domain) => domain.name === "profile") &&
+    file === "frontend/src/main.jsx" &&
+    terms.some((term) => ["tab", "about", "about-me", "favorites", "favorited", "profile"].includes(term))
+  ) {
+    score += 24;
   }
 
   return score;

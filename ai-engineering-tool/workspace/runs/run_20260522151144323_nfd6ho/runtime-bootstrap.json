@@ -1,0 +1,19 @@
+{
+  "status": "linked",
+  "links": [
+    {
+      "from": "/Users/doumengyao/work/Conduiteg/.env",
+      "to": "/Users/doumengyao/work/end2endProject/ai-engineering-tool/workspace/worktrees/run_20260522151144323_nfd6ho/.env",
+      "status": "linked"
+    },
+    {
+      "from": "/Users/doumengyao/work/Conduiteg/backend/.env",
+      "to": "/Users/doumengyao/work/end2endProject/ai-engineering-tool/workspace/worktrees/run_20260522151144323_nfd6ho/backend/.env",
+      "status": "linked"
+    }
+  ],
+  "expectedFiles": [
+    ".env",
+    "backend/.env"
+  ]
+}

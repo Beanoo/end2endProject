@@ -1,0 +1,49 @@
+diff --git a/frontend/src/routes/Profile/Profile.jsx b/frontend/src/routes/Profile/Profile.jsx
+--- a/frontend/src/routes/Profile/Profile.jsx
++++ b/frontend/src/routes/Profile/Profile.jsx
+@@ -10,6 +10,7 @@ function Profile() {
+       <ContainerRow>
+         <div className="col-xs-12 col-md-10 offset-md-1">
+           <div className="articles-toggle">
+             <ul className="nav nav-pills outline-active">
++              <NavItem text="About Me" url="about-me" state={state} />
+               <NavItem text="My Articles" url="" state={state} />
+               <NavItem text="Favorited Articles" url="favorites" state={state} />
+             </ul>
+diff --git a/frontend/src/routes/Profile/ProfileAboutMe.jsx b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+new file mode 100644
+diff --git a//dev/null b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+--- a//dev/null
++++ b/frontend/src/routes/Profile/ProfileAboutMe.jsx
+@@ -0,0 +1,33 @@
++import { useLocation, useParams } from "react-router-dom";
++import { useAuth } from "../../context/AuthContext";
++
++function ProfileAboutMe() {
++  const { state } = useLocation();
++  const { username } = useParams();
++  const { loggedUser } = useAuth();
++
++  const bio = state?.bio;
++  const isProfileOwner = loggedUser?.username === username;
++
++  return (
++    <div className="profile-about-me mt-4">
++      <div className="p-4 bg-light rounded">
++        <div className="d-flex align-items-center justify-content-between mb-3">
++          <h4 className="mb-0">About Me</h4>
++          {isProfileOwner && (
++            <button className="btn btn-sm btn-outline-secondary">
++              <i className="ion-edit mr-1"></i>编辑简介
++            </button>
++          )}
++        </div>
++        <p className="text-muted mb-0" style={{ whiteSpace: "pre-line" }}>
++          {bio || "该用户暂未填写个人简介"}
++        </p>
++      </div>
++    </div>
++  );
++}
++
++export default ProfileAboutMe;

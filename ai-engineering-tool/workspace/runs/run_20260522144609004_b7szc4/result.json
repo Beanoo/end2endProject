@@ -1,0 +1,25 @@
+{
+  "runId": "run_20260522144609004_b7szc4",
+  "status": "failed",
+  "requirement": "在 Profile 页面现有 My Articles / Favorited Articles 之外新增一个 About Me Tab，展示 User.bio",
+  "startedAt": "2026-05-22T14:46:09.004Z",
+  "completedAt": "2026-05-22T14:48:52.142Z",
+  "targetRepo": "/Users/doumengyao/work/Conduiteg",
+  "repoStatus": {
+    "branch": "main",
+    "gitDir": ".git",
+    "head": "5d315829f12bd18f60523252368fefd2b95dfce9",
+    "isDirty": false,
+    "root": "/Users/doumengyao/work/Conduiteg",
+    "status": []
+  },
+  "error": {
+    "message": "Model patch could not be applied after repair attempts",
+    "status": 422
+  },
+  "artifacts": {
+    "events": "workspace/runs/run_20260522144609004_b7szc4/events.jsonl",
+    "result": "workspace/runs/run_20260522144609004_b7szc4/result.json",
+    "knowledge": "workspace/runs/run_20260522144609004_b7szc4/knowledge-draft.json"
+  }
+}

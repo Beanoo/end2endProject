@@ -1,0 +1,5 @@
+error: dev/null: No such file or directory
+error: patch failed: frontend/src/routes/Profile/Profile.jsx:10
+error: frontend/src/routes/Profile/Profile.jsx: patch does not apply
+error: patch failed: frontend/src/main.jsx:38
+error: frontend/src/main.jsx: patch does not apply
