@@ -110,6 +110,13 @@
               `
               : ""
           }
+          ${
+            run.status === "needs_repair_continuation" ||
+            run.status === "rejected_by_code_review" ||
+            run.status === "blocked_by_verification"
+              ? `<button id="continue-run">Continue LLM repair</button>`
+              : ""
+          }
           <div class="grid">
             ${run.stages
               .map(
@@ -136,6 +143,31 @@
             const notes = document.getElementById("confirmation-notes").value;
             confirmWorkflow(run.runId, notes);
           });
+        }
+
+        const continueButton = document.getElementById("continue-run");
+        if (continueButton) {
+          continueButton.addEventListener("click", () => continueWorkflow(run.runId));
+        }
+      }
+
+      async function continueWorkflow(runId) {
+        runButton.disabled = true;
+        result.textContent = "Continuing LLM repair...";
+
+        try {
+          const response = await fetch(`/api/workflows/${runId}/continue`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ maxAttempts: 3 }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "Workflow failed");
+          renderRun(payload);
+        } catch (error) {
+          result.innerHTML = `<pre>${error.message}</pre>`;
+        } finally {
+          runButton.disabled = false;
         }
       }
 

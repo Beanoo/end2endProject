@@ -27,10 +27,14 @@ flowchart TD
   L -- "否" --> N["分片整文件 fallback"]
   N --> M
   M --> O{"review pass"}
-  O -- "reject" --> I
+  O -- "reject, budget remains" --> I
+  O -- "reject, budget exhausted" --> S["needs_repair_continuation"]
+  S --> T["POST /api/workflows/:runId/continue"]
+  T --> I
   O -- "pass" --> P["测试/构建/API smoke"]
   P --> Q{"验证通过"}
-  Q -- "失败" --> I
+  Q -- "失败, budget remains" --> I
+  Q -- "失败, budget exhausted" --> S
   Q -- "通过" --> R["交付报告 + 知识回写"]
 ```
 
@@ -114,6 +118,21 @@ LLM review 使用一票否决策略：如果模型在 `risks` 或 `suggestions` 
 - React 组件不得删除原有 props，调用方不得传入组件未支持的 props，避免共享组件 API 回归。
 
 需求相关的边界输入不再硬编码。验证阶段会让 LLM 根据需求和 diff 生成最多 2 个后端 smoke probe，例如长文本、长 URL、空值、重复值、权限、旧数据兼容等；工具只提供安全执行框架、占位符数据和本地 API 调用能力。
+
+## 修复续跑
+
+Code review 或 verification 失败时，流程不会把失败视为最终交付。自动修复预算耗尽后，run 会进入 `needs_repair_continuation`，保留同一个 Conduit worktree、历史 stage、最后一次 review/verification 反馈，并返回下一步操作：
+
+```json
+{
+  "nextAction": {
+    "type": "continue_repair",
+    "endpoint": "POST /api/workflows/:runId/continue"
+  }
+}
+```
+
+继续修复会把最后一次失败反馈重新喂给模块定位和代码生成，让 LLM 在同一 worktree 上继续修正，而不是从头开始或直接结束。
 
 对于封面图需求，人工验收建议至少包括：
 

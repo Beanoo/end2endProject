@@ -64,6 +64,52 @@ function buildCodeGenerationFeedback(error) {
   };
 }
 
+function buildNeedsRepairResult({
+  runId,
+  requirement,
+  startedAt,
+  target,
+  repoStatus,
+  gitWorktree,
+  stages,
+  artifacts,
+  reason,
+}) {
+  return {
+    runId,
+    status: "needs_repair_continuation",
+    requirement,
+    startedAt,
+    completedAt: new Date().toISOString(),
+    targetRepo: target,
+    repoStatus,
+    gitWorktree,
+    stages,
+    artifacts,
+    nextAction: {
+      type: "continue_repair",
+      endpoint: `POST /api/workflows/${runId}/continue`,
+      reason,
+    },
+  };
+}
+
+function findLastStage(stages, name) {
+  return [...(stages || [])].reverse().find((stage) => stage.name === name);
+}
+
+function buildContinuationFeedback(stages) {
+  const reviewStage = findLastStage(stages, "code_review");
+  if (reviewStage?.data?.verdict && reviewStage.data.verdict !== "pass") {
+    return buildReviewFeedback(reviewStage);
+  }
+  const verificationStage = findLastStage(stages, "verification");
+  if (verificationStage?.status && verificationStage.status !== "completed") {
+    return buildVerificationFeedback(verificationStage);
+  }
+  return null;
+}
+
 async function runWorkflow({
   requirement,
   targetRepo = defaultTargetRepo,
@@ -157,7 +203,7 @@ async function runWorkflow({
 
     let feedback = null;
     let finalAttempt = null;
-    const maxAttempts = 3;
+    const maxAttempts = Number(process.env.WORKFLOW_MAX_ATTEMPTS || 5);
     stages.push(runtimeBootstrapStage);
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -219,18 +265,17 @@ async function runWorkflow({
           feedback = buildReviewFeedback(reviewStage);
           continue;
         }
-        const result = {
+        const result = buildNeedsRepairResult({
           runId,
-          status: "rejected_by_code_review",
           requirement,
           startedAt,
-          completedAt: new Date().toISOString(),
-          targetRepo: target,
+          target,
           repoStatus,
           gitWorktree,
           stages,
           artifacts,
-        };
+          reason: "code_review_reject",
+        });
         writeJson(runDir, "result.json", result);
         writeDeliveryReport({ runDir, result });
         writeEvent(runDir, { type: "run_completed", runId, status: result.status });
@@ -258,18 +303,17 @@ async function runWorkflow({
           feedback = buildVerificationFeedback(verificationStage);
           continue;
         }
-        const result = {
+        const result = buildNeedsRepairResult({
           runId,
-          status: "blocked_by_verification",
           requirement,
           startedAt,
-          completedAt: new Date().toISOString(),
-          targetRepo: target,
+          target,
           repoStatus,
           gitWorktree,
           stages,
           artifacts,
-        };
+          reason: "verification_blocked",
+        });
         writeJson(runDir, "result.json", result);
         writeDeliveryReport({ runDir, result });
         writeEvent(runDir, { type: "run_completed", runId, status: result.status });
@@ -357,8 +401,169 @@ async function confirmWorkflow(runId, { confirmationOverrides = null, targetRepo
   });
 }
 
+async function continueWorkflow(runId, { maxAttempts = 3 } = {}) {
+  const existing = readWorkflow(runId);
+  const allowedStatuses = new Set([
+    "needs_repair_continuation",
+    "rejected_by_code_review",
+    "blocked_by_verification",
+  ]);
+  if (!allowedStatuses.has(existing.status)) {
+    const error = new Error(`Workflow ${runId} is not waiting for repair continuation`);
+    error.status = 409;
+    throw error;
+  }
+
+  const runDir = path.join(__dirname, "..", "workspace", "runs", runId);
+  const target = path.resolve(existing.targetRepo || defaultTargetRepo);
+  const repoStatus = existing.repoStatus || getRepoStatus(target);
+  const gitWorktree = existing.gitWorktree;
+  if (!gitWorktree?.targetPath) {
+    const error = new Error(`Workflow ${runId} has no repairable worktree`);
+    error.status = 409;
+    throw error;
+  }
+
+  const stages = existing.stages || [];
+  const requirementStage = stages.find((stage) => stage.name === "requirement_clarification");
+  const planStage = stages.find((stage) => stage.name === "solution_planning");
+  if (!requirementStage || !planStage) {
+    const error = new Error(`Workflow ${runId} is missing requirement or plan stage`);
+    error.status = 409;
+    throw error;
+  }
+
+  const artifacts = existing.artifacts || {
+    events: `workspace/runs/${runId}/events.jsonl`,
+    result: `workspace/runs/${runId}/result.json`,
+    knowledge: `workspace/runs/${runId}/knowledge-draft.json`,
+  };
+  let feedback = buildContinuationFeedback(stages) || {
+    reason: "manual_repair_continuation",
+    summary: "用户要求继续修复当前 worktree。",
+  };
+  writeEvent(runDir, { type: "repair_continuation_started", runId, feedback });
+
+  for (let attempt = 0; attempt < Number(maxAttempts || 3); attempt += 1) {
+    writeEvent(runDir, {
+      type: "repair_retry_started",
+      attempt,
+      feedback,
+    });
+
+    const moduleStage = completeStage(
+      runDir,
+      await locateModules(gitWorktree.targetPath, { requirementStage, runDir, feedback }),
+    );
+    stages.push(moduleStage);
+
+    let codeStage;
+    try {
+      codeStage = completeStage(
+        runDir,
+        await generateAndApplyPatch({
+          runDir,
+          worktreePath: gitWorktree.targetPath,
+          gitRootPath: gitWorktree.path,
+          targetRelativePath: gitWorktree.targetRelativePath === "." ? "" : gitWorktree.targetRelativePath,
+          requirementStage,
+          planStage,
+          moduleStage,
+          feedback,
+        }),
+      );
+    } catch (error) {
+      feedback = buildCodeGenerationFeedback(error);
+      continue;
+    }
+    stages.push(codeStage);
+
+    const reviewStage = completeStage(
+      runDir,
+      await reviewGeneratedCode({
+        runDir,
+        worktreePath: gitWorktree.targetPath,
+        gitRootPath: gitWorktree.path,
+        targetRelativePath: gitWorktree.targetRelativePath === "." ? "" : gitWorktree.targetRelativePath,
+        requirementStage,
+        planStage,
+        moduleStage,
+        codeStage,
+      }),
+    );
+    stages.push(reviewStage);
+
+    if (reviewStage.data.verdict !== "pass") {
+      feedback = buildReviewFeedback(reviewStage);
+      continue;
+    }
+
+    const testStage = completeStage(runDir, planTests({ moduleStage, codeStage }));
+    stages.push(testStage);
+    const verificationStage = completeStage(
+      runDir,
+      await runVerification({
+        worktreePath: gitWorktree.targetPath,
+        gitRootPath: gitWorktree.path,
+        targetRelativePath: gitWorktree.targetRelativePath === "." ? "" : gitWorktree.targetRelativePath,
+        targetRepo: target,
+        runDir,
+        moduleStage,
+        requirementStage,
+      }),
+    );
+    stages.push(verificationStage);
+
+    if (verificationStage.status !== "completed") {
+      feedback = buildVerificationFeedback(verificationStage);
+      continue;
+    }
+
+    const deliveryStage = completeStage(
+      runDir,
+      packageDelivery({ gitWorktree, moduleStage, planStage, requirementStage, codeStage, reviewStage }),
+    );
+    stages.push(deliveryStage);
+    const knowledgeStage = completeStage(
+      runDir,
+      writeKnowledge({ targetRepo: target, gitWorktree, moduleStage }),
+    );
+    stages.push(knowledgeStage);
+
+    const result = {
+      ...existing,
+      status: "completed_with_gates",
+      completedAt: new Date().toISOString(),
+      stages,
+      artifacts,
+    };
+    writeJson(runDir, "result.json", result);
+    writeJson(runDir, "knowledge-draft.json", knowledgeStage.data);
+    writeDeliveryReport({ runDir, result });
+    writeEvent(runDir, { type: "run_completed", runId, status: result.status });
+    return result;
+  }
+
+  const result = buildNeedsRepairResult({
+    runId,
+    requirement: existing.requirement,
+    startedAt: existing.startedAt,
+    target,
+    repoStatus,
+    gitWorktree,
+    stages,
+    artifacts,
+    reason: feedback.reason || "repair_budget_exhausted",
+  });
+  writeJson(runDir, "result.json", result);
+  writeDeliveryReport({ runDir, result });
+  writeEvent(runDir, { type: "run_completed", runId, status: result.status });
+  return result;
+}
+
 module.exports = {
   confirmWorkflow,
+  continueWorkflow,
   runWorkflow,
   readWorkflow,
 };
