@@ -112,6 +112,10 @@ LLM review 使用一票否决策略：如果模型在 `risks` 或 `suggestions` 
 - 后端变更文件执行 `node --check`，提前发现语法错误。
 - `backend/controllers/articles.js` 必须完整导出 `allArticles/createArticle/singleArticle/updateArticle/deleteArticle/articlesFeed`。
 - `FormFieldset` 修改不得删除既有 props，且调用方不得传入未被组件支持的 props。
+- URL/图片链接类字段不能默认使用 `DataTypes.STRING`，因为 Postgres 会映射为 `varchar(255)`；应使用 `DataTypes.TEXT` 或显式足够长度。
+- 提交失败时必须保留后端真实错误，不能把所有错误都降级成 `Submit article failed`。
+
+后端 smoke 会在检测到 `coverImage` 支持时额外创建一篇带长图片 URL 的文章，覆盖 Google 图片结果页这类长链接输入，避免数据库字段长度问题漏过。
 
 对于封面图需求，人工验收建议至少包括：
 

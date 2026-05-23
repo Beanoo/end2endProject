@@ -113,6 +113,62 @@ function checkArticlesControllerExports({ worktreePath, changedFiles }) {
   }];
 }
 
+function checkUrlFieldStorage({ worktreePath, changedFiles, requirementStage }) {
+  const text = [
+    requirementStage?.data?.title,
+    requirementStage?.data?.userStory,
+    ...(requirementStage?.data?.acceptanceCriteria || []),
+    ...(requirementStage?.data?.openQuestions || []),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+  const urlRequirement = /url|链接|图片|image|cover/.test(text);
+  if (!urlRequirement) return [];
+
+  return changedFiles
+    .map((item) => item.file)
+    .filter((file) => file.startsWith("backend/models/") && file.endsWith(".js"))
+    .flatMap((file) => {
+      const content = readTextIfExists(path.join(worktreePath, file));
+      const findings = [];
+      const urlStringFieldPattern =
+        /(?:coverImage|imageUrl|imageURL|coverUrl|coverURL|.*Url|.*URL)\s*:\s*(?:DataTypes\.STRING|\{\s*type:\s*DataTypes\.STRING)/g;
+      const matches = content.match(urlStringFieldPattern) || [];
+
+      if (matches.length > 0) {
+        findings.push({
+          file,
+          message:
+            "URL/图片链接类字段使用了 DataTypes.STRING，Postgres 会映射为 varchar(255)，长图片链接会保存失败；应使用 DataTypes.TEXT 或显式足够长度。",
+        });
+      }
+      return findings;
+    });
+}
+
+function checkErrorMessagePropagation({ worktreePath, changedFiles }) {
+  const touched = changedFiles.some(
+    (item) => item.file === "frontend/src/components/ArticleEditorForm/ArticleEditorForm.jsx",
+  );
+  if (!touched) return [];
+
+  const file = "frontend/src/components/ArticleEditorForm/ArticleEditorForm.jsx";
+  const content = readTextIfExists(path.join(worktreePath, file));
+  const swallowsThrownString =
+    content.includes("Submit article failed") &&
+    content.includes("err?.response?.data") &&
+    !content.includes("typeof err === \"string\"") &&
+    !content.includes("typeof err === 'string'");
+
+  if (!swallowsThrownString) return [];
+  return [{
+    file,
+    message:
+      "提交失败处理只读取 err.response，无法展示 errorHandler 抛出的字符串错误，会把真实后端错误降级成 Submit article failed。",
+  }];
+}
+
 function extractDestructuredProps(content, componentName) {
   const match = content.match(new RegExp(`function\\s+${componentName}\\s*\\(\\s*\\{([\\s\\S]*?)\\}\\s*\\)`));
   if (!match) return new Set();
@@ -176,7 +232,7 @@ function checkFormFieldsetCompatibility({ gitRootPath, worktreePath, changedFile
   return findings;
 }
 
-function deterministicReview({ gitRootPath, worktreePath, changedFiles }) {
+function deterministicReview({ gitRootPath, worktreePath, changedFiles, requirementStage }) {
   const addedFrontendFiles = changedFiles
     .filter((item) => item.status === "A" && item.file.startsWith("frontend/src/"))
     .map((item) => item.file);
@@ -207,6 +263,8 @@ function deterministicReview({ gitRootPath, worktreePath, changedFiles }) {
   const findings = [
     ...runBackendSyntaxChecks({ worktreePath, changedFiles }),
     ...checkArticlesControllerExports({ worktreePath, changedFiles }),
+    ...checkUrlFieldStorage({ worktreePath, changedFiles, requirementStage }),
+    ...checkErrorMessagePropagation({ worktreePath, changedFiles }),
     ...checkFormFieldsetCompatibility({ gitRootPath, worktreePath, changedFiles }),
   ];
 
@@ -293,7 +351,12 @@ async function reviewGeneratedCode({
 }) {
   const diff = saveReviewDiff({ gitRootPath, targetRelativePath, runDir });
   const changedFiles = readChangedFiles({ gitRootPath, targetRelativePath });
-  const deterministicRejection = deterministicReview({ gitRootPath, worktreePath, changedFiles });
+  const deterministicRejection = deterministicReview({
+    gitRootPath,
+    worktreePath,
+    changedFiles,
+    requirementStage,
+  });
   if (deterministicRejection) {
     fs.writeFileSync(path.join(runDir, "code-review-raw.json"), JSON.stringify(deterministicRejection, null, 2));
     fs.writeFileSync(path.join(runDir, "code-review.json"), JSON.stringify(deterministicRejection, null, 2));

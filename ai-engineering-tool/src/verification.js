@@ -90,6 +90,30 @@ async function requestSmokeTarget({ baseUrl, target }) {
   };
 }
 
+async function requestJson({ baseUrl, path: requestPath, method = "GET", headers = {}, body }) {
+  const response = await fetch(`${baseUrl}${requestPath}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  return {
+    statusCode: response.status,
+    passed: response.status >= 200 && response.status < 400,
+    body: text.slice(0, 700),
+    json,
+  };
+}
+
 async function waitForBackend({ baseUrl, child, timeoutMs }) {
   const started = Date.now();
   let lastError = "";
@@ -154,6 +178,65 @@ function planBackendSmokeTargets(moduleStage) {
   return [...new Map(targets.map((target) => [target.path, target])).values()];
 }
 
+function hasCoverImageSupport(worktreePath) {
+  const articleModel = path.join(worktreePath, "backend", "models", "Article.js");
+  if (!fs.existsSync(articleModel)) return false;
+  return fs.readFileSync(articleModel, "utf8").includes("coverImage");
+}
+
+async function requestCoverImageCreateSmoke({ baseUrl }) {
+  const nonce = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const signUp = await requestJson({
+    baseUrl,
+    path: "/api/users",
+    method: "POST",
+    body: {
+      user: {
+        username: `coverSmoke${nonce}`,
+        email: `coverSmoke${nonce}@example.com`,
+        password: "password123",
+      },
+    },
+  });
+
+  if (!signUp.passed) {
+    return {
+      name: "cover-image-create",
+      path: "/api/articles",
+      statusCode: signUp.statusCode,
+      passed: false,
+      body: `signup failed: ${signUp.body}`,
+    };
+  }
+
+  const token = signUp.json?.user?.token;
+  const longImageUrl =
+    "https://www.google.com/imgres?q=%E5%B0%8F%E7%8C%AB&imgurl=https%3A%2F%2Fwww.shutterstock.com%2Fimage-photo%2Ffunny-little-kitten-looks-around-260nw-2512772793.jpg&imgrefurl=https%3A%2F%2Fwww.shutterstock.com%2Fzh%2Fsearch%2F%25E5%25B0%258F%25E7%259A%2584%25E5%25B0%258F%25E7%258C%25AB&docid=GrKNooVwNzAkUM&tbnid=Pz-yEjERRP_5wM&vet=12ahUKEwjLrbDKwc2UAxUrplYBHXDCAZcQnPAOegQIIRAB..i&w=390&h=280&hcb=2&ved=2ahUKEwjLrbDKwc2UAxUrplYBHXDCAZcQnPAOegQIIRAB";
+  const createArticle = await requestJson({
+    baseUrl,
+    path: "/api/articles",
+    method: "POST",
+    headers: { Authorization: `Token ${token}` },
+    body: {
+      article: {
+        title: `cover smoke ${nonce}`,
+        description: "cover image smoke",
+        body: "cover image smoke body",
+        tagList: ["cover-smoke"],
+        coverImage: longImageUrl,
+      },
+    },
+  });
+
+  return {
+    name: "cover-image-create",
+    path: "/api/articles",
+    statusCode: createArticle.statusCode,
+    passed: createArticle.passed && createArticle.json?.article?.coverImage === longImageUrl,
+    body: createArticle.body,
+  };
+}
+
 function stopProcess(child) {
   if (!child.pid || child.killed) return;
   try {
@@ -194,6 +277,9 @@ async function runBackendSmoke({ worktreePath, runDir, moduleStage }) {
     const checks = [];
     for (const target of targets) {
       checks.push(await requestSmokeTarget({ baseUrl, target }));
+    }
+    if (hasCoverImageSupport(worktreePath)) {
+      checks.push(await requestCoverImageCreateSmoke({ baseUrl }));
     }
     const failed = checks.filter((check) => !check.passed);
     if (failed.length > 0) {
