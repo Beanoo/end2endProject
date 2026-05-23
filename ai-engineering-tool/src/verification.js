@@ -1,6 +1,26 @@
 const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const { chatCompletion } = require("./llm/arkClient");
+
+function stripFence(text) {
+  return String(text || "")
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+}
+
+function parseJson(content) {
+  const stripped = stripFence(content);
+  const match = stripped.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
 
 function ensureNodeModules({ worktreePath, targetRepo, runDir }) {
   const worktreeNodeModules = path.join(worktreePath, "node_modules");
@@ -178,63 +198,152 @@ function planBackendSmokeTargets(moduleStage) {
   return [...new Map(targets.map((target) => [target.path, target])).values()];
 }
 
-function hasCoverImageSupport(worktreePath) {
-  const articleModel = path.join(worktreePath, "backend", "models", "Article.js");
-  if (!fs.existsSync(articleModel)) return false;
-  return fs.readFileSync(articleModel, "utf8").includes("coverImage");
+function renderProbeValue(value, variables) {
+  if (typeof value === "string") {
+    return value.replace(/\{\{([A-Za-z0-9_]+)\}\}/g, (_, key) => variables[key] || "");
+  }
+  if (Array.isArray(value)) return value.map((item) => renderProbeValue(item, variables));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, renderProbeValue(item, variables)]),
+    );
+  }
+  return value;
 }
 
-async function requestCoverImageCreateSmoke({ baseUrl }) {
+async function requestBackendProbe({ baseUrl, probe }) {
   const nonce = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
-  const signUp = await requestJson({
-    baseUrl,
-    path: "/api/users",
-    method: "POST",
-    body: {
-      user: {
-        username: `coverSmoke${nonce}`,
-        email: `coverSmoke${nonce}@example.com`,
-        password: "password123",
-      },
-    },
-  });
+  const variables = {
+    nonce,
+    longText: `long-text-${nonce}-${"x".repeat(700)}`,
+    longUrl: `https://example.com/assets/${nonce}/${"x".repeat(520)}.jpg?source=ai-verification-probe`,
+  };
 
-  if (!signUp.passed) {
-    return {
-      name: "cover-image-create",
-      path: "/api/articles",
-      statusCode: signUp.statusCode,
-      passed: false,
-      body: `signup failed: ${signUp.body}`,
-    };
+  if (probe.setup === "signup") {
+    const username = `probe${nonce}`;
+    const email = `probe${nonce}@example.com`;
+    variables.username = username;
+    variables.email = email;
+    variables.password = "password123";
+
+    const signUp = await requestJson({
+      baseUrl,
+      path: "/api/users",
+      method: "POST",
+      body: {
+        user: {
+          username,
+          email,
+          password: variables.password,
+        },
+      },
+    });
+
+    if (!signUp.passed) {
+      return {
+        name: probe.name,
+        path: probe.path,
+        statusCode: signUp.statusCode,
+        passed: false,
+        body: `signup failed: ${signUp.body}`,
+      };
+    }
+
+    variables.token = signUp.json?.user?.token || "";
   }
 
-  const token = signUp.json?.user?.token;
-  const longImageUrl =
-    "https://www.google.com/imgres?q=%E5%B0%8F%E7%8C%AB&imgurl=https%3A%2F%2Fwww.shutterstock.com%2Fimage-photo%2Ffunny-little-kitten-looks-around-260nw-2512772793.jpg&imgrefurl=https%3A%2F%2Fwww.shutterstock.com%2Fzh%2Fsearch%2F%25E5%25B0%258F%25E7%259A%2584%25E5%25B0%258F%25E7%258C%25AB&docid=GrKNooVwNzAkUM&tbnid=Pz-yEjERRP_5wM&vet=12ahUKEwjLrbDKwc2UAxUrplYBHXDCAZcQnPAOegQIIRAB..i&w=390&h=280&hcb=2&ved=2ahUKEwjLrbDKwc2UAxUrplYBHXDCAZcQnPAOegQIIRAB";
-  const createArticle = await requestJson({
+  const headers = renderProbeValue(probe.headers || {}, variables);
+  const body = renderProbeValue(probe.body || null, variables);
+  const expectedStatus = Number(probe.expectedStatus || 200);
+  const responseContains = (probe.responseContains || []).map((item) => renderProbeValue(item, variables));
+  const response = await requestJson({
     baseUrl,
-    path: "/api/articles",
-    method: "POST",
-    headers: { Authorization: `Token ${token}` },
-    body: {
-      article: {
-        title: `cover smoke ${nonce}`,
-        description: "cover image smoke",
-        body: "cover image smoke body",
-        tagList: ["cover-smoke"],
-        coverImage: longImageUrl,
-      },
-    },
+    path: probe.path,
+    method: probe.method || "GET",
+    headers,
+    body,
   });
+  const missingText = responseContains.filter((item) => item && !response.body.includes(item));
 
   return {
-    name: "cover-image-create",
-    path: "/api/articles",
-    statusCode: createArticle.statusCode,
-    passed: createArticle.passed && createArticle.json?.article?.coverImage === longImageUrl,
-    body: createArticle.body,
+    name: probe.name,
+    path: probe.path,
+    statusCode: response.statusCode,
+    passed: response.statusCode === expectedStatus && missingText.length === 0,
+    body: response.body,
+    expectedStatus,
+    missingText,
   };
+}
+
+async function planDynamicBackendProbes({ runDir, requirementStage, moduleStage, diff }) {
+  const touchesBackend = hasAnyPath(moduleStage, [
+    /backend\/controllers\//,
+    /backend\/routes\//,
+    /backend\/models\//,
+  ]);
+  if (!touchesBackend) return [];
+
+  const prompt = [
+    "你是 Conduit/RealWorld 仓库的验证用例规划 Agent。只输出 JSON，不要 markdown。",
+    "目标：根据 PM 需求和本次 diff 生成最多 2 个后端 smoke probe，覆盖最可能漏掉的真实用户边界输入。",
+    "不要针对某个固定需求写死；请从需求本身推导输入，例如长文本、长 URL、空值、重复值、权限、旧数据兼容。",
+    "只允许使用本地 Conduit API；不得请求外网。",
+    "可用占位符：{{nonce}}, {{token}}, {{username}}, {{email}}, {{password}}, {{longText}}, {{longUrl}}。",
+    "如果需要登录态，setup 使用 signup，Authorization header 写成 Token {{token}}。",
+    "",
+    "JSON schema:",
+    JSON.stringify(
+      {
+        backendProbes: [
+          {
+            name: "probe name",
+            setup: "signup | none",
+            method: "POST",
+            path: "/api/articles",
+            headers: { Authorization: "Token {{token}}" },
+            body: {},
+            expectedStatus: 201,
+            responseContains: ["optional expected response substring"],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "",
+    "PM 需求澄清:",
+    JSON.stringify(requirementStage?.data || {}, null, 2),
+    "",
+    "模块定位:",
+    JSON.stringify({
+      matchedDomains: moduleStage?.data?.matchedDomains || [],
+      editBoundary: moduleStage?.data?.editBoundary || [],
+    }, null, 2),
+    "",
+    "本次 diff:",
+    diff.slice(0, 16000),
+  ].join("\n");
+
+  const content = await chatCompletion({
+    runDir,
+    purpose: "verification_probe_planning",
+    temperature: 0.05,
+    messages: [
+      { role: "system", content: "你只输出合法 JSON。" },
+      { role: "user", content: prompt },
+    ],
+  });
+  fs.writeFileSync(path.join(runDir, "verification-probes-raw.json"), content);
+
+  const parsed = parseJson(content) || {};
+  const probes = Array.isArray(parsed.backendProbes) ? parsed.backendProbes : [];
+  const safeProbes = probes
+    .filter((probe) => probe && typeof probe.path === "string" && probe.path.startsWith("/api/"))
+    .filter((probe) => ["GET", "POST", "PUT", "DELETE", undefined].includes(probe.method))
+    .slice(0, 2);
+  fs.writeFileSync(path.join(runDir, "verification-probes.json"), JSON.stringify(safeProbes, null, 2));
+  return safeProbes;
 }
 
 function stopProcess(child) {
@@ -250,7 +359,7 @@ function stopProcess(child) {
   }
 }
 
-async function runBackendSmoke({ worktreePath, runDir, moduleStage }) {
+async function runBackendSmoke({ worktreePath, runDir, moduleStage, dynamicProbes = [] }) {
   const port = String(3101 + Math.floor(Math.random() * 700));
   const targets = planBackendSmokeTargets(moduleStage);
   const output = [];
@@ -278,8 +387,8 @@ async function runBackendSmoke({ worktreePath, runDir, moduleStage }) {
     for (const target of targets) {
       checks.push(await requestSmokeTarget({ baseUrl, target }));
     }
-    if (hasCoverImageSupport(worktreePath)) {
-      checks.push(await requestCoverImageCreateSmoke({ baseUrl }));
+    for (const probe of dynamicProbes) {
+      checks.push(await requestBackendProbe({ baseUrl, probe }));
     }
     const failed = checks.filter((check) => !check.passed);
     if (failed.length > 0) {
@@ -328,6 +437,7 @@ async function runVerification({
   targetRepo,
   runDir,
   moduleStage,
+  requirementStage,
 }) {
   const dependencies = ensureNodeModules({ worktreePath, targetRepo, runDir });
   const runtime = ensureLocalRuntimeFiles({ worktreePath, targetRepo, runDir });
@@ -356,8 +466,9 @@ async function runVerification({
     fileName: "build-output.txt",
     runDir,
   });
-  const backendSmoke = await runBackendSmoke({ worktreePath, runDir, moduleStage });
   const diff = saveDiff({ gitRootPath, targetRelativePath, runDir });
+  const dynamicProbes = await planDynamicBackendProbes({ runDir, requirementStage, moduleStage, diff });
+  const backendSmoke = await runBackendSmoke({ worktreePath, runDir, moduleStage, dynamicProbes });
   const passed =
     test.status === "passed" && build.status === "passed" && backendSmoke.status === "passed";
 
@@ -369,6 +480,7 @@ async function runVerification({
       test,
       build,
       backendSmoke,
+      dynamicProbes,
       dependencies,
       runtime,
       diffBytes: Buffer.byteLength(diff),

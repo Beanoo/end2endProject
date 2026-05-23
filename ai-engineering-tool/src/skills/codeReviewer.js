@@ -85,88 +85,48 @@ function runBackendSyntaxChecks({ worktreePath, changedFiles }) {
   return findings;
 }
 
-function checkArticlesControllerExports({ worktreePath, changedFiles }) {
-  const touched = changedFiles.some((item) => item.file === "backend/controllers/articles.js");
-  if (!touched) return [];
-  const file = "backend/controllers/articles.js";
-  const content = readTextIfExists(path.join(worktreePath, file));
-  const requiredExports = [
-    "allArticles",
-    "createArticle",
-    "singleArticle",
-    "updateArticle",
-    "deleteArticle",
-    "articlesFeed",
-  ];
-  const moduleExportsMatch = content.match(/module\.exports\s*=\s*\{([\s\S]*?)\};/);
-
-  if (!moduleExportsMatch) {
-    return [{ file, message: "articles controller 缺少完整的 module.exports = { ... }; 导出块。" }];
-  }
-
-  const exportBlock = moduleExportsMatch[1];
-  const missing = requiredExports.filter((name) => !new RegExp(`\\b${name}\\b`).test(exportBlock));
-  if (missing.length === 0) return [];
-  return [{
-    file,
-    message: `articles controller 导出不完整，缺少：${missing.join(", ")}。`,
-  }];
+function extractCommonJsExports(content) {
+  const match = content.match(/module\.exports\s*=\s*\{([\s\S]*?)\};/);
+  if (!match) return null;
+  return new Set(
+    match[1]
+      .split(",")
+      .map((item) => item.trim().split(":")[0].trim())
+      .filter(Boolean),
+  );
 }
 
-function checkUrlFieldStorage({ worktreePath, changedFiles, requirementStage }) {
-  const text = [
-    requirementStage?.data?.title,
-    requirementStage?.data?.userStory,
-    ...(requirementStage?.data?.acceptanceCriteria || []),
-    ...(requirementStage?.data?.openQuestions || []),
-  ]
-    .filter(Boolean)
-    .join("\n")
-    .toLowerCase();
-  const urlRequirement = /url|链接|图片|image|cover/.test(text);
-  if (!urlRequirement) return [];
-
+function checkCommonJsExportCompatibility({ gitRootPath, worktreePath, changedFiles }) {
   return changedFiles
     .map((item) => item.file)
-    .filter((file) => file.startsWith("backend/models/") && file.endsWith(".js"))
+    .filter((file) => file.startsWith("backend/") && file.endsWith(".js"))
     .flatMap((file) => {
-      const content = readTextIfExists(path.join(worktreePath, file));
-      const findings = [];
-      const urlStringFieldPattern =
-        /(?:coverImage|imageUrl|imageURL|coverUrl|coverURL|.*Url|.*URL)\s*:\s*(?:DataTypes\.STRING|\{\s*type:\s*DataTypes\.STRING)/g;
-      const matches = content.match(urlStringFieldPattern) || [];
-
-      if (matches.length > 0) {
-        findings.push({
-          file,
-          message:
-            "URL/图片链接类字段使用了 DataTypes.STRING，Postgres 会映射为 varchar(255)，长图片链接会保存失败；应使用 DataTypes.TEXT 或显式足够长度。",
+      let baseContent = "";
+      try {
+        baseContent = execFileSync("git", ["show", `HEAD:${file}`], {
+          cwd: gitRootPath,
+          encoding: "utf8",
         });
+      } catch {
+        baseContent = "";
       }
-      return findings;
+
+      const baseExports = extractCommonJsExports(baseContent);
+      if (!baseExports || baseExports.size === 0) return [];
+
+      const currentContent = readTextIfExists(path.join(worktreePath, file));
+      const currentExports = extractCommonJsExports(currentContent);
+      if (!currentExports) {
+        return [{ file, message: "原文件存在 CommonJS 导出块，当前版本缺少完整 module.exports 导出块。" }];
+      }
+
+      const missing = [...baseExports].filter((name) => !currentExports.has(name));
+      if (missing.length === 0) return [];
+      return [{
+        file,
+        message: `CommonJS 导出不兼容，缺少原有导出：${missing.join(", ")}。`,
+      }];
     });
-}
-
-function checkErrorMessagePropagation({ worktreePath, changedFiles }) {
-  const touched = changedFiles.some(
-    (item) => item.file === "frontend/src/components/ArticleEditorForm/ArticleEditorForm.jsx",
-  );
-  if (!touched) return [];
-
-  const file = "frontend/src/components/ArticleEditorForm/ArticleEditorForm.jsx";
-  const content = readTextIfExists(path.join(worktreePath, file));
-  const swallowsThrownString =
-    content.includes("Submit article failed") &&
-    content.includes("err?.response?.data") &&
-    !content.includes("typeof err === \"string\"") &&
-    !content.includes("typeof err === 'string'");
-
-  if (!swallowsThrownString) return [];
-  return [{
-    file,
-    message:
-      "提交失败处理只读取 err.response，无法展示 errorHandler 抛出的字符串错误，会把真实后端错误降级成 Submit article failed。",
-  }];
 }
 
 function extractDestructuredProps(content, componentName) {
@@ -180,53 +140,65 @@ function extractDestructuredProps(content, componentName) {
   );
 }
 
-function checkFormFieldsetCompatibility({ gitRootPath, worktreePath, changedFiles }) {
-  const file = "frontend/src/components/FormFieldset/FormFieldset.jsx";
+function componentNameFromFile(file) {
+  return path.basename(file, path.extname(file));
+}
+
+function checkReactComponentPropCompatibility({ gitRootPath, worktreePath, changedFiles }) {
   const changedFileNames = changedFiles.map((item) => item.file);
-  const currentContent = readTextIfExists(path.join(worktreePath, file));
-  if (!currentContent) return [];
-
-  let baseContent = "";
-  try {
-    baseContent = execFileSync("git", ["show", `HEAD:${file}`], {
-      cwd: gitRootPath,
-      encoding: "utf8",
-    });
-  } catch {
-    baseContent = "";
-  }
-
-  const currentProps = extractDestructuredProps(currentContent, "FormFieldset");
-  const baseProps = extractDestructuredProps(baseContent, "FormFieldset");
+  const componentFiles = changedFileNames.filter(
+    (file) => file.startsWith("frontend/src/") && /\.(jsx|tsx)$/.test(file),
+  );
   const findings = [];
-  const removedProps = [...baseProps].filter((prop) => !currentProps.has(prop));
 
-  if (changedFileNames.includes(file) && removedProps.length > 0) {
-    findings.push({
-      file,
-      message: `FormFieldset 移除了既有 props：${removedProps.join(", ")}，会破坏现有表单调用。`,
-    });
-  }
+  for (const file of componentFiles) {
+    const currentContent = readTextIfExists(path.join(worktreePath, file));
+    const componentName = componentNameFromFile(file);
+    if (!currentContent || !currentContent.includes(`function ${componentName}`)) continue;
 
-  const filesToScan = changedFileNames.filter((changedFile) => changedFile.startsWith("frontend/src/"));
-  const unsupportedUsages = [];
-  for (const changedFile of filesToScan) {
-    const content = readTextIfExists(path.join(worktreePath, changedFile));
-    const matches = content.matchAll(/<FormFieldset\s+([^>]*?)\/?>/gs);
-    for (const match of matches) {
-      const attrs = [...match[1].matchAll(/\s([A-Za-z_$][\w$-]*)=/g)].map((attr) => attr[1]);
-      const unsupported = attrs.filter((attr) => !currentProps.has(attr));
-      if (unsupported.length > 0) {
-        unsupportedUsages.push(`${changedFile}: ${unsupported.join(", ")}`);
+    let baseContent = "";
+    try {
+      baseContent = execFileSync("git", ["show", `HEAD:${file}`], {
+        cwd: gitRootPath,
+        encoding: "utf8",
+      });
+    } catch {
+      baseContent = "";
+    }
+
+    const currentProps = extractDestructuredProps(currentContent, componentName);
+    const baseProps = extractDestructuredProps(baseContent, componentName);
+    const removedProps = [...baseProps].filter((prop) => !currentProps.has(prop));
+
+    if (removedProps.length > 0) {
+      findings.push({
+        file,
+        message: `${componentName} 移除了既有 props：${removedProps.join(", ")}，可能破坏现有调用方。`,
+      });
+    }
+
+    if (currentProps.size === 0) continue;
+
+    const unsupportedUsages = [];
+    const usagePattern = new RegExp(`<${componentName}\\s+([^>]*?)\\/?>`, "gs");
+    for (const changedFile of changedFileNames.filter((name) => name.startsWith("frontend/src/"))) {
+      const content = readTextIfExists(path.join(worktreePath, changedFile));
+      const matches = content.matchAll(usagePattern);
+      for (const match of matches) {
+        const attrs = [...match[1].matchAll(/\s([A-Za-z_$][\w$-]*)=/g)].map((attr) => attr[1]);
+        const unsupported = attrs.filter((attr) => !currentProps.has(attr));
+        if (unsupported.length > 0) {
+          unsupportedUsages.push(`${changedFile}: ${unsupported.join(", ")}`);
+        }
       }
     }
-  }
 
-  if (unsupportedUsages.length > 0) {
-    findings.push({
-      file,
-      message: `FormFieldset 调用传入了组件未声明的 props：${unsupportedUsages.join("；")}。`,
-    });
+    if (unsupportedUsages.length > 0) {
+      findings.push({
+        file,
+        message: `${componentName} 调用传入了组件未声明的 props：${unsupportedUsages.join("；")}。`,
+      });
+    }
   }
 
   return findings;
@@ -262,10 +234,8 @@ function deterministicReview({ gitRootPath, worktreePath, changedFiles, requirem
 
   const findings = [
     ...runBackendSyntaxChecks({ worktreePath, changedFiles }),
-    ...checkArticlesControllerExports({ worktreePath, changedFiles }),
-    ...checkUrlFieldStorage({ worktreePath, changedFiles, requirementStage }),
-    ...checkErrorMessagePropagation({ worktreePath, changedFiles }),
-    ...checkFormFieldsetCompatibility({ gitRootPath, worktreePath, changedFiles }),
+    ...checkCommonJsExportCompatibility({ gitRootPath, worktreePath, changedFiles }),
+    ...checkReactComponentPropCompatibility({ gitRootPath, worktreePath, changedFiles }),
   ];
 
   if (findings.length > 0) {
@@ -377,6 +347,7 @@ async function reviewGeneratedCode({
     "你是一个严格的 AI Code Review Agent，目标仓库是 Conduit/RealWorld 全栈博客。",
     "请只基于本次需求、模块边界、代码 diff 和相关上下文做审查。",
     "不要挑纯风格偏好；重点审查功能正确性、回归风险、边界条件、安全/数据风险、测试缺口、是否越界修改。",
+    "必须根据需求推导边界输入和真实使用场景，例如长文本、长 URL、空值、重复值、直接访问页面、无权限访问、旧数据兼容等；不要只审查 happy path。",
     "如果发现会导致功能错误、运行时错误、测试明显缺失或修改边界不合理的问题，verdict 必须是 reject。",
     "如果风险或建议中包含破坏原有交互、回归、不符合产品逻辑、必须恢复/移除某段行为，verdict 必须是 reject，不能 pass。",
     "如果没有阻断性问题，verdict 为 pass，并说明代码变动范围和预估影响。",

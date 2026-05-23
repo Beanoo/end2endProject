@@ -237,6 +237,7 @@ async function runWorkflow({
           targetRepo: target,
           runDir,
           moduleStage,
+          requirementStage,
         }),
       );
       stages.push(verificationStage);

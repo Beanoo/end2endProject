@@ -49,11 +49,11 @@ flowchart TD
 ```json
 {
   "confirmationOverrides": {
-    "freeText": "coverImage 可为空；只允许 http/https URL；暂不做本地上传；不要修改共享错误类。",
+    "freeText": "请按默认实现范围执行；不要修改共享错误类；本期不做额外上传能力。",
     "acceptanceCriteria": [
-      "coverImage 为可选 URL",
-      "旧文章无封面图时页面不报错",
-      "新建和编辑文章均可保存封面图"
+      "新增字段为可选项",
+      "旧数据缺少该字段时页面不报错",
+      "新建和编辑流程均可保存并回显该字段"
     ],
     "outOfScope": [
       "本期不做本地图片上传"
@@ -110,12 +110,10 @@ LLM review 使用一票否决策略：如果模型在 `risks` 或 `suggestions` 
 在 LLM review 前还会执行确定性检查：
 
 - 后端变更文件执行 `node --check`，提前发现语法错误。
-- `backend/controllers/articles.js` 必须完整导出 `allArticles/createArticle/singleArticle/updateArticle/deleteArticle/articlesFeed`。
-- `FormFieldset` 修改不得删除既有 props，且调用方不得传入未被组件支持的 props。
-- URL/图片链接类字段不能默认使用 `DataTypes.STRING`，因为 Postgres 会映射为 `varchar(255)`；应使用 `DataTypes.TEXT` 或显式足够长度。
-- 提交失败时必须保留后端真实错误，不能把所有错误都降级成 `Submit article failed`。
+- CommonJS 模块不得丢失原有导出，避免 controller/service 被截断后仍进入后续流程。
+- React 组件不得删除原有 props，调用方不得传入组件未支持的 props，避免共享组件 API 回归。
 
-后端 smoke 会在检测到 `coverImage` 支持时额外创建一篇带长图片 URL 的文章，覆盖 Google 图片结果页这类长链接输入，避免数据库字段长度问题漏过。
+需求相关的边界输入不再硬编码。验证阶段会让 LLM 根据需求和 diff 生成最多 2 个后端 smoke probe，例如长文本、长 URL、空值、重复值、权限、旧数据兼容等；工具只提供安全执行框架、占位符数据和本地 API 调用能力。
 
 对于封面图需求，人工验收建议至少包括：
 
