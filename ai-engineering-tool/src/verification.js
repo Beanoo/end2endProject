@@ -49,6 +49,28 @@ function ensureNodeModules({ worktreePath, targetRepo, runDir }) {
   });
 }
 
+function bootstrapWorktreeRuntime({ worktreePath, targetRepo, runDir }) {
+  const targetNodeModules = path.join(targetRepo, "node_modules");
+  const worktreeNodeModules = path.join(worktreePath, "node_modules");
+  let dependencies = { status: "missing", expectedSource: targetNodeModules };
+
+  if (fs.existsSync(worktreeNodeModules)) {
+    dependencies = { status: "exists", path: worktreeNodeModules };
+  } else if (fs.existsSync(targetNodeModules)) {
+    fs.symlinkSync(targetNodeModules, worktreeNodeModules, "dir");
+    dependencies = {
+      status: "linked",
+      from: targetNodeModules,
+      to: worktreeNodeModules,
+    };
+  }
+
+  const runtime = ensureLocalRuntimeFiles({ worktreePath, targetRepo, runDir });
+  const result = { dependencies, runtime };
+  fs.writeFileSync(path.join(runDir, "worktree-runtime-bootstrap.json"), JSON.stringify(result, null, 2));
+  return result;
+}
+
 function linkIfExists({ from, to }) {
   if (!fs.existsSync(from) || fs.existsSync(to)) return null;
   fs.symlinkSync(from, to);
@@ -490,5 +512,6 @@ async function runVerification({
 }
 
 module.exports = {
+  bootstrapWorktreeRuntime,
   runVerification,
 };

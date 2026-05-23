@@ -15,7 +15,7 @@ const {
 } = require("./skills/requirementConfirmation");
 const { generateAndApplyPatch } = require("./skills/patchGenerator");
 const { reviewGeneratedCode } = require("./skills/codeReviewer");
-const { runVerification } = require("./verification");
+const { bootstrapWorktreeRuntime, runVerification } = require("./verification");
 const { writeDeliveryReport } = require("./report");
 
 function createRunId() {
@@ -144,10 +144,21 @@ async function runWorkflow({
     gitWorktree.targetPath = worktreeTargetPath;
     gitWorktree.targetRelativePath = targetRelativePath || ".";
     writeEvent(runDir, { type: "worktree_created", gitWorktree });
+    const runtimeBootstrapStage = completeStage(runDir, {
+      name: "worktree_runtime_bootstrap",
+      status: "completed",
+      summary: "已为 Conduit worktree 链接依赖和本地运行配置。",
+      data: bootstrapWorktreeRuntime({
+        worktreePath: worktreeTargetPath,
+        targetRepo: target,
+        runDir,
+      }),
+    });
 
     let feedback = null;
     let finalAttempt = null;
     const maxAttempts = 3;
+    stages.push(runtimeBootstrapStage);
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       if (feedback) {
