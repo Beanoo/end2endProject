@@ -1,21 +1,51 @@
 const { writeFileSync, appendFileSync } = require("fs");
 const path = require("path");
+const { loadLocalEnv } = require("../env");
+
+loadLocalEnv();
 
 const defaultBaseUrl = "https://ark.cn-beijing.volces.com/api/v3";
 const defaultModel = "ep-20260514110933-mzh58";
 
-function getArkConfig() {
+function firstPresent(...values) {
+  return values.find((value) => typeof value === "string" && value.trim());
+}
+
+function normalizeBaseUrl(baseUrl) {
+  return baseUrl.replace(/\/+$/, "");
+}
+
+function getLlmConfig() {
   return {
-    apiKey: process.env.ARK_API_KEY,
-    baseUrl: process.env.ARK_BASE_URL || defaultBaseUrl,
-    model: process.env.ARK_MODEL || defaultModel,
+    apiKey: firstPresent(
+      process.env.LLM_API_KEY,
+      process.env.DEEPSEEK_API_KEY,
+      process.env.ARK_API_KEY,
+    ),
+    baseUrl: normalizeBaseUrl(
+      firstPresent(
+        process.env.LLM_BASE_URL,
+        process.env.DEEPSEEK_BASE_URL,
+        process.env.ARK_BASE_URL,
+        defaultBaseUrl,
+      ),
+    ),
+    model: firstPresent(
+      process.env.LLM_MODEL,
+      process.env.DEEPSEEK_MODEL,
+      process.env.ARK_MODEL,
+      defaultModel,
+    ),
   };
 }
 
-function requireArkConfig() {
-  const config = getArkConfig();
+function requireLlmConfig() {
+  const config = getLlmConfig();
   if (!config.apiKey) {
-    const error = new Error("ARK_API_KEY is required for model-backed P1 workflow");
+    const error = new Error(
+      "LLM_API_KEY is required for model-backed workflow. " +
+        "DEEPSEEK_API_KEY and ARK_API_KEY are also supported.",
+    );
     error.status = 500;
     throw error;
   }
@@ -30,7 +60,7 @@ function writeModelCall(runDir, payload) {
 }
 
 async function chatCompletion({ messages, runDir, purpose, temperature = 0.2 }) {
-  const config = requireArkConfig();
+  const config = requireLlmConfig();
   const started = Date.now();
   const response = await fetch(`${config.baseUrl}/chat/completions`, {
     method: "POST",
@@ -45,7 +75,13 @@ async function chatCompletion({ messages, runDir, purpose, temperature = 0.2 }) 
     }),
   });
   const latencyMs = Date.now() - started;
-  const body = await response.json();
+  const rawBody = await response.text();
+  let body = {};
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    body = { raw: rawBody };
+  }
 
   writeModelCall(runDir, {
     purpose,
@@ -71,6 +107,6 @@ async function chatCompletion({ messages, runDir, purpose, temperature = 0.2 }) 
 
 module.exports = {
   chatCompletion,
-  getArkConfig,
+  getArkConfig: getLlmConfig,
+  getLlmConfig,
 };
-

@@ -11,7 +11,7 @@ function buildImplementationSlices(requirement) {
     .toLowerCase();
   const slices = [];
 
-  if (/(模型|字段|schema|model|database|数据库|sequelize|article)/i.test(text)) {
+  if (/(模型|字段|schema|model|database|数据库|sequelize|持久化|migration)/i.test(text)) {
     slices.push({
       id: "backend-data-model",
       goal: "更新后端数据模型/实体字段，保证新增字段可以被持久化并兼容旧数据。",
@@ -20,7 +20,7 @@ function buildImplementationSlices(requirement) {
     });
   }
 
-  if (/(接口|api|controller|route|校验|validation|article)/i.test(text)) {
+  if (/(接口|api|controller|route|校验|validation|入参|响应|序列化)/i.test(text)) {
     slices.push({
       id: "backend-api-contract",
       goal: "更新 API 入参、校验、序列化/响应字段，保持 RealWorld article contract 可用。",
@@ -38,7 +38,7 @@ function buildImplementationSlices(requirement) {
     });
   }
 
-  if (/(列表|卡片|feed|preview|card|展示)/i.test(text)) {
+  if (/(列表|卡片|feed|preview|card)/i.test(text)) {
     slices.push({
       id: "frontend-list-rendering",
       goal: "更新文章列表/卡片展示，保证新增字段在 feed 中可见且旧数据不报错。",

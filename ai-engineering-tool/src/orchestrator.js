@@ -1,6 +1,6 @@
 const path = require("path");
 const { defaultTargetRepo } = require("./config");
-const { createPlanningWorktree, getRepoStatus } = require("./git");
+const { createPlanningWorktree, getRepoStatus, resetWorktreeChanges } = require("./git");
 const { ensureRunWorkspace, readJson, writeEvent, writeJson } = require("./workspace");
 const clarifyRequirement = require("./skills/llmRequirementClarifier");
 const planSolution = require("./skills/solutionPlanner");
@@ -24,12 +24,37 @@ function createRunId() {
     .slice(2, 8)}`;
 }
 
+const STAGE_ORDER = [
+  "requirement_clarification",
+  "solution_planning",
+  "requirement_confirmation",
+  "worktree_runtime_bootstrap",
+  "module_location",
+  "code_generation",
+  "code_review",
+  "test_planning",
+  "verification",
+  "delivery_packaging",
+  "knowledge_writing",
+];
+
+const activeRepairRuns = new Set();
+
+function calculateProgress(stageName) {
+  const index = STAGE_ORDER.indexOf(stageName);
+  if (index === -1) return 0;
+  return Math.round(((index + 1) / STAGE_ORDER.length) * 100);
+}
+
 function completeStage(runDir, stage) {
+  const progress = calculateProgress(stage.name);
   writeEvent(runDir, {
     type: "stage_completed",
     stage: stage.name,
     status: stage.status,
     summary: stage.summary,
+    progress,
+    completedAt: new Date().toISOString(),
   });
   return stage;
 }
@@ -64,6 +89,73 @@ function buildCodeGenerationFeedback(error) {
   };
 }
 
+function buildRepairRunningResult({ existing, runId, target, repoStatus, gitWorktree, stages, artifacts, feedback }) {
+  return {
+    ...existing,
+    runId,
+    status: "repair_running",
+    repairStartedAt: new Date().toISOString(),
+    targetRepo: target,
+    repoStatus,
+    gitWorktree,
+    stages,
+    artifacts,
+    currentRepair: {
+      feedback,
+    },
+  };
+}
+
+function reviewFailureFingerprint(reviewStage) {
+  if (!reviewStage || reviewStage.name !== "code_review" || reviewStage.data?.verdict === "pass") {
+    return null;
+  }
+  const requiredChanges = Array.isArray(reviewStage.data?.requiredChanges)
+    ? reviewStage.data.requiredChanges
+    : [];
+  const risks = Array.isArray(reviewStage.data?.risks) ? reviewStage.data.risks : [];
+  return JSON.stringify({
+    summary: reviewStage.summary || "",
+    requiredChanges,
+    risks,
+  });
+}
+
+function shouldFuseRepeatedReviewFailure(stages, currentReviewStage) {
+  const currentFingerprint = reviewFailureFingerprint(currentReviewStage);
+  if (!currentFingerprint) return false;
+  const previousReviewStage = [...stages]
+    .reverse()
+    .find((stage) => stage.name === "code_review" && stage !== currentReviewStage);
+  return reviewFailureFingerprint(previousReviewStage) === currentFingerprint;
+}
+
+function resetDirtyRepairWorktree({ runDir, gitRootPath, targetRelativePath, reason }) {
+  const pathspec = targetRelativePath || ".";
+  const status = resetWorktreeChanges(gitRootPath, pathspec);
+  writeEvent(runDir, {
+    type: "repair_worktree_reset",
+    reason,
+    pathspec,
+    status,
+  });
+  return status;
+}
+
+function shouldResetBeforeRetry(feedback) {
+  return feedback?.reason === "code_generation_failed";
+}
+
+function writeRetryStartedEvent({ runDir, type, attempt, feedback, resetStatus }) {
+  writeEvent(runDir, {
+    type,
+    attempt,
+    feedback,
+    worktreeMode: resetStatus ? "reset_before_retry" : "incremental_retry",
+    ...(resetStatus ? { resetStatus } : {}),
+  });
+}
+
 function buildNeedsRepairResult({
   runId,
   requirement,
@@ -96,6 +188,50 @@ function buildNeedsRepairResult({
 
 function findLastStage(stages, name) {
   return [...(stages || [])].reverse().find((stage) => stage.name === name);
+}
+
+function cloneStage(stage) {
+  return JSON.parse(JSON.stringify(stage));
+}
+
+function stabilizeModuleStage(moduleStage, boundaryState) {
+  if (!boundaryState) return moduleStage;
+
+  const stableStage = cloneStage(moduleStage);
+  const data = stableStage.data || {};
+  const currentEditBoundary = data.editBoundary || [];
+  const currentReadOnlyFiles = data.readOnlyFiles || [];
+  const currentRelatedTests = data.relatedTests || [];
+
+  boundaryState.editBoundary = [
+    ...new Set([...(boundaryState.editBoundary || []), ...currentEditBoundary]),
+  ];
+  boundaryState.readOnlyFiles = [
+    ...new Set([...(boundaryState.readOnlyFiles || []), ...currentReadOnlyFiles]),
+  ];
+  boundaryState.relatedTests = [
+    ...new Set([...(boundaryState.relatedTests || []), ...currentRelatedTests]),
+  ];
+
+  data.editBoundary = boundaryState.editBoundary;
+  data.primaryEditBoundary = boundaryState.editBoundary;
+  data.readOnlyFiles = boundaryState.readOnlyFiles.filter((file) => !data.editBoundary.includes(file));
+  data.relatedTests = boundaryState.relatedTests;
+  data.boundaryStability = {
+    mode: "retry_union",
+    stableEditBoundaryCount: data.editBoundary.length,
+    stableReadOnlyCount: data.readOnlyFiles.length,
+  };
+  data.files = [
+    ...new Map([
+      ...((data.files || []).map((file) => [file.path, file])),
+      ...data.editBoundary.map((file) => [file, { exists: true, path: file, role: "editable" }]),
+      ...data.readOnlyFiles.map((file) => [file, { exists: true, path: file, role: "context" }]),
+    ]).values(),
+  ];
+  stableStage.data = data;
+  stableStage.summary = `${moduleStage.summary} 边界稳定后可编辑文件 ${data.editBoundary.length} 个。`;
+  return stableStage;
 }
 
 function buildContinuationFeedback(stages) {
@@ -204,20 +340,34 @@ async function runWorkflow({
     let feedback = null;
     let finalAttempt = null;
     const maxAttempts = Number(process.env.WORKFLOW_MAX_ATTEMPTS || 5);
+    const boundaryState = { editBoundary: [], readOnlyFiles: [], relatedTests: [] };
     stages.push(runtimeBootstrapStage);
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       if (feedback) {
-        writeEvent(runDir, {
+        const resetStatus = shouldResetBeforeRetry(feedback)
+          ? resetDirtyRepairWorktree({
+              runDir,
+              gitRootPath: gitWorktree.path,
+              targetRelativePath: targetRelativePath || ".",
+              reason: feedback.reason || "retry",
+            })
+          : null;
+        writeRetryStartedEvent({
+          runDir,
           type: "boundary_retry_started",
           attempt,
           feedback,
+          resetStatus,
         });
       }
 
       const moduleStage = completeStage(
         runDir,
-        await locateModules(worktreeTargetPath, { requirementStage, runDir, feedback }),
+        stabilizeModuleStage(
+          await locateModules(worktreeTargetPath, { requirementStage, runDir, feedback }),
+          boundaryState,
+        ),
       );
       stages.push(moduleStage);
 
@@ -402,8 +552,14 @@ async function confirmWorkflow(runId, { confirmationOverrides = null, targetRepo
 }
 
 async function continueWorkflow(runId, { maxAttempts = 3 } = {}) {
+  if (activeRepairRuns.has(runId)) {
+    const error = new Error(`Workflow ${runId} repair continuation is already running`);
+    error.status = 409;
+    throw error;
+  }
   const existing = readWorkflow(runId);
   const allowedStatuses = new Set([
+    "repair_running",
     "needs_repair_continuation",
     "rejected_by_code_review",
     "blocked_by_verification",
@@ -442,26 +598,72 @@ async function continueWorkflow(runId, { maxAttempts = 3 } = {}) {
     reason: "manual_repair_continuation",
     summary: "用户要求继续修复当前 worktree。",
   };
-  writeEvent(runDir, { type: "repair_continuation_started", runId, feedback });
+  const previousModuleStages = stages.filter((stage) => stage.name === "module_location");
+  const boundaryState = {
+    editBoundary: [...new Set(previousModuleStages.flatMap((stage) => stage.data?.editBoundary || []))],
+    readOnlyFiles: [...new Set(previousModuleStages.flatMap((stage) => stage.data?.readOnlyFiles || []))],
+    relatedTests: [...new Set(previousModuleStages.flatMap((stage) => stage.data?.relatedTests || []))],
+  };
+  activeRepairRuns.add(runId);
 
-  for (let attempt = 0; attempt < Number(maxAttempts || 3); attempt += 1) {
-    writeEvent(runDir, {
-      type: "repair_retry_started",
-      attempt,
-      feedback,
-    });
-
-    const moduleStage = completeStage(
+  try {
+    writeEvent(runDir, { type: "repair_continuation_started", runId, feedback });
+    writeJson(
       runDir,
-      await locateModules(gitWorktree.targetPath, { requirementStage, runDir, feedback }),
+      "result.json",
+      buildRepairRunningResult({ existing, runId, target, repoStatus, gitWorktree, stages, artifacts, feedback }),
     );
-    stages.push(moduleStage);
 
-    let codeStage;
-    try {
-      codeStage = completeStage(
+    for (let attempt = 0; attempt < Number(maxAttempts || 3); attempt += 1) {
+      const resetStatus = shouldResetBeforeRetry(feedback)
+        ? resetDirtyRepairWorktree({
+            runDir,
+            gitRootPath: gitWorktree.path,
+            targetRelativePath: gitWorktree.targetRelativePath === "." ? "." : gitWorktree.targetRelativePath,
+            reason: feedback.reason || "repair_continuation",
+          })
+        : null;
+      writeRetryStartedEvent({
         runDir,
-        await generateAndApplyPatch({
+        type: "repair_retry_started",
+        attempt,
+        feedback,
+        resetStatus,
+      });
+
+      const moduleStage = completeStage(
+        runDir,
+        stabilizeModuleStage(
+          await locateModules(gitWorktree.targetPath, { requirementStage, runDir, feedback }),
+          boundaryState,
+        ),
+      );
+      stages.push(moduleStage);
+
+      let codeStage;
+      try {
+        codeStage = completeStage(
+          runDir,
+          await generateAndApplyPatch({
+            runDir,
+            worktreePath: gitWorktree.targetPath,
+            gitRootPath: gitWorktree.path,
+            targetRelativePath: gitWorktree.targetRelativePath === "." ? "" : gitWorktree.targetRelativePath,
+            requirementStage,
+            planStage,
+            moduleStage,
+            feedback,
+          }),
+        );
+      } catch (error) {
+        feedback = buildCodeGenerationFeedback(error);
+        continue;
+      }
+      stages.push(codeStage);
+
+      const reviewStage = completeStage(
+        runDir,
+        await reviewGeneratedCode({
           runDir,
           worktreePath: gitWorktree.targetPath,
           gitRootPath: gitWorktree.path,
@@ -469,96 +671,94 @@ async function continueWorkflow(runId, { maxAttempts = 3 } = {}) {
           requirementStage,
           planStage,
           moduleStage,
-          feedback,
+          codeStage,
         }),
       );
-    } catch (error) {
-      feedback = buildCodeGenerationFeedback(error);
-      continue;
-    }
-    stages.push(codeStage);
+      stages.push(reviewStage);
 
-    const reviewStage = completeStage(
-      runDir,
-      await reviewGeneratedCode({
+      if (reviewStage.data.verdict !== "pass") {
+        feedback = buildReviewFeedback(reviewStage);
+        if (shouldFuseRepeatedReviewFailure(stages, reviewStage)) {
+          feedback = {
+            ...feedback,
+            reason: "repeated_review_failure",
+            summary: `${feedback.summary || "修复失败"} 同类 code review 失败连续出现，已停止自动 rerun。`,
+          };
+          writeEvent(runDir, {
+            type: "repair_fuse_tripped",
+            runId,
+            reason: feedback.reason,
+            feedback,
+          });
+          break;
+        }
+        continue;
+      }
+
+      const testStage = completeStage(runDir, planTests({ moduleStage, codeStage }));
+      stages.push(testStage);
+      const verificationStage = completeStage(
         runDir,
-        worktreePath: gitWorktree.targetPath,
-        gitRootPath: gitWorktree.path,
-        targetRelativePath: gitWorktree.targetRelativePath === "." ? "" : gitWorktree.targetRelativePath,
-        requirementStage,
-        planStage,
-        moduleStage,
-        codeStage,
-      }),
-    );
-    stages.push(reviewStage);
+        await runVerification({
+          worktreePath: gitWorktree.targetPath,
+          gitRootPath: gitWorktree.path,
+          targetRelativePath: gitWorktree.targetRelativePath === "." ? "" : gitWorktree.targetRelativePath,
+          targetRepo: target,
+          runDir,
+          moduleStage,
+          requirementStage,
+        }),
+      );
+      stages.push(verificationStage);
 
-    if (reviewStage.data.verdict !== "pass") {
-      feedback = buildReviewFeedback(reviewStage);
-      continue;
-    }
+      if (verificationStage.status !== "completed") {
+        feedback = buildVerificationFeedback(verificationStage);
+        continue;
+      }
 
-    const testStage = completeStage(runDir, planTests({ moduleStage, codeStage }));
-    stages.push(testStage);
-    const verificationStage = completeStage(
-      runDir,
-      await runVerification({
-        worktreePath: gitWorktree.targetPath,
-        gitRootPath: gitWorktree.path,
-        targetRelativePath: gitWorktree.targetRelativePath === "." ? "" : gitWorktree.targetRelativePath,
-        targetRepo: target,
+      const deliveryStage = completeStage(
         runDir,
-        moduleStage,
-        requirementStage,
-      }),
-    );
-    stages.push(verificationStage);
+        packageDelivery({ gitWorktree, moduleStage, planStage, requirementStage, codeStage, reviewStage }),
+      );
+      stages.push(deliveryStage);
+      const knowledgeStage = completeStage(
+        runDir,
+        writeKnowledge({ targetRepo: target, gitWorktree, moduleStage }),
+      );
+      stages.push(knowledgeStage);
 
-    if (verificationStage.status !== "completed") {
-      feedback = buildVerificationFeedback(verificationStage);
-      continue;
+      const result = {
+        ...existing,
+        status: "completed_with_gates",
+        completedAt: new Date().toISOString(),
+        stages,
+        artifacts,
+      };
+      writeJson(runDir, "result.json", result);
+      writeJson(runDir, "knowledge-draft.json", knowledgeStage.data);
+      writeDeliveryReport({ runDir, result });
+      writeEvent(runDir, { type: "run_completed", runId, status: result.status });
+      return result;
     }
 
-    const deliveryStage = completeStage(
-      runDir,
-      packageDelivery({ gitWorktree, moduleStage, planStage, requirementStage, codeStage, reviewStage }),
-    );
-    stages.push(deliveryStage);
-    const knowledgeStage = completeStage(
-      runDir,
-      writeKnowledge({ targetRepo: target, gitWorktree, moduleStage }),
-    );
-    stages.push(knowledgeStage);
-
-    const result = {
-      ...existing,
-      status: "completed_with_gates",
-      completedAt: new Date().toISOString(),
+    const result = buildNeedsRepairResult({
+      runId,
+      requirement: existing.requirement,
+      startedAt: existing.startedAt,
+      target,
+      repoStatus,
+      gitWorktree,
       stages,
       artifacts,
-    };
+      reason: feedback.reason || "repair_budget_exhausted",
+    });
     writeJson(runDir, "result.json", result);
-    writeJson(runDir, "knowledge-draft.json", knowledgeStage.data);
     writeDeliveryReport({ runDir, result });
     writeEvent(runDir, { type: "run_completed", runId, status: result.status });
     return result;
+  } finally {
+    activeRepairRuns.delete(runId);
   }
-
-  const result = buildNeedsRepairResult({
-    runId,
-    requirement: existing.requirement,
-    startedAt: existing.startedAt,
-    target,
-    repoStatus,
-    gitWorktree,
-    stages,
-    artifacts,
-    reason: feedback.reason || "repair_budget_exhausted",
-  });
-  writeJson(runDir, "result.json", result);
-  writeDeliveryReport({ runDir, result });
-  writeEvent(runDir, { type: "run_completed", runId, status: result.status });
-  return result;
 }
 
 module.exports = {

@@ -132,11 +132,17 @@ function isBlocked(file) {
   return blockedPathPatterns.some((pattern) => pattern.test(file));
 }
 
-function isAllowed(file, allowedFiles, allowedNewFilePrefixes) {
+function isAllowed(
+  file,
+  allowedFiles,
+  allowedNewFilePrefixes,
+  { fileExists = true, allowedExistingSourceRoots = [] } = {},
+) {
   if (file === "/dev/null") return true;
   if (isBlocked(file)) return false;
   if (allowedFiles.includes(file)) return true;
-  return allowedNewFilePrefixes.some((prefix) => file.startsWith(prefix));
+  if (fileExists && allowedExistingSourceRoots.some((root) => file.startsWith(root))) return true;
+  return !fileExists && allowedNewFilePrefixes.some((prefix) => file.startsWith(prefix));
 }
 
 function auditTouchedFiles(touchedFiles, moduleStage) {
@@ -161,9 +167,10 @@ function auditTouchedFiles(touchedFiles, moduleStage) {
   });
 }
 
-function validatePatch(patch, boundary) {
+function validatePatch(patch, boundary, worktreePath) {
   const allowedFiles = boundary.allowedFiles || [];
   const allowedNewFilePrefixes = boundary.allowedNewFilePrefixes || defaultAllowedNewFilePrefixes;
+  const allowedExistingSourceRoots = boundary.allowedExistingSourceRoots || [];
   const touchedFiles = [];
   const disallowed = [];
 
@@ -173,7 +180,10 @@ function validatePatch(patch, boundary) {
     const file = normalizePatchPath(match[1]);
     if (file === "/dev/null") continue;
     touchedFiles.push(file);
-    if (!isAllowed(file, allowedFiles, allowedNewFilePrefixes)) disallowed.push(file);
+    const fileExists = fs.existsSync(path.join(worktreePath, file));
+    if (!isAllowed(file, allowedFiles, allowedNewFilePrefixes, { fileExists, allowedExistingSourceRoots })) {
+      disallowed.push(file);
+    }
   }
 
   if (disallowed.length > 0) {
@@ -286,6 +296,19 @@ function buildFileContext(worktreePath, moduleStage) {
     .join("\n\n");
 }
 
+function readCurrentDiff({ gitRootPath, targetRelativePath }) {
+  try {
+    const pathspec = targetRelativePath || ".";
+    return execFileSync("git", ["diff", "--", pathspec], {
+      cwd: gitRootPath,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024 * 4,
+    });
+  } catch {
+    return "";
+  }
+}
+
 function buildSliceFileContext(worktreePath, moduleStage, slice) {
   const data = moduleStage?.data || {};
   const allFiles = [...new Set([...(data.editBoundary || []), ...(data.readOnlyFiles || [])])];
@@ -307,12 +330,25 @@ function buildBoundary(moduleStage) {
   return {
     allowedFiles,
     allowedNewFilePrefixes: data.allowedNewFilePrefixes || defaultAllowedNewFilePrefixes,
+    allowedExistingSourceRoots: data.writePolicy?.allowedExistingSourceRoots || [],
   };
 }
 
 function formatFeedback(feedback) {
   if (!feedback) return "";
   return JSON.stringify(feedback, null, 2);
+}
+
+function isPatchFormatFailure(feedback) {
+  const errorText = String(feedback?.error || feedback?.summary || "").toLowerCase();
+  return [
+    "git apply",
+    "corrupt patch",
+    "patch fragment without header",
+    "patch does not apply",
+    "unrecognized input",
+    "malformed patch",
+  ].some((signal) => errorText.includes(signal));
 }
 
 async function askForPatch({ runDir, purpose, requirementText, planStage, moduleStage, fileContext, previous, feedback }) {
@@ -328,8 +364,8 @@ async function askForPatch({ runDir, purpose, requirementText, planStage, module
         previous.error,
         "",
         "修复要求：",
-        "如果上一次 patch 触碰了不允许文件，本次必须完全移除这些文件的 diff。",
-        "本次输出只能包含上面“可修改的既有文件”和允许新增目录内的文件。",
+        "如果上一次 patch 触碰了硬禁止文件，本次必须完全移除这些文件的 diff。",
+        "优先修改稳定编辑边界内文件；若需求或失败反馈必须修改其它源码区既有文件，可以最小化修改并接受审计。",
       ].join("\n")
     : "";
 
@@ -349,19 +385,35 @@ async function askForPatch({ runDir, purpose, requirementText, planStage, module
     "方案约束：",
     JSON.stringify(planStage?.data || {}, null, 2),
     feedback ? ["", "上一次失败反馈：", formatFeedback(feedback)].join("\n") : "",
+    feedback?.currentDiff
+      ? [
+          "",
+          "当前 worktree 已保留的累计 diff：",
+          feedback.currentDiff,
+          "",
+          "增量修复要求：保留累计 diff 中已经正确的实现，只补齐失败反馈指出的缺口。",
+        ].join("\n")
+      : "",
     "",
-    "建议优先修改的文件（不是唯一可修改范围）：",
+    "稳定编辑边界（优先修改，不是唯一源码区）：",
     boundary.allowedFiles.map((file) => `- ${file}`).join("\n") || "- 无",
     "",
     "Audited Write Policy:",
-    "你可以修改 frontend/src/ 与 backend/ 下的源码文件，但每个超出建议边界的修改都会被审计；必须保持最小必要改动。",
+    "既有文件优先修改稳定编辑边界；如果需求或失败反馈明确要求，可以修改 frontend/src/ 与 backend/ 下其它既有源码文件。",
+    "当上一次失败反馈包含 requiredChanges 时，本轮只修 requiredChanges 指向的问题和文件，不要重写无关模块；如果当前 worktree 已有正确改动，必须保留并在其上增量修复。",
+    "超出稳定编辑边界的既有源码改动会被记录为 audited_source_expansion，并由 code review 判断必要性。",
+    "新增文件仅允许放在允许新增文件的源码目录前缀内，且必须被真实调用链接入。",
     "禁止修改 node_modules、dist/build、package.json、package-lock.json、.env、backend/migrations、backend/seeders。",
     "",
     "允许新增文件的源码目录前缀：",
     boundary.allowedNewFilePrefixes.map((prefix) => `- ${prefix}`).join("\n"),
     "",
-    "禁止发明未出现在相关文件上下文里的 import、service、helper 或组件；需要接口数据时优先复用上下文中已有服务。",
+    "绝对禁止发明未出现在相关文件上下文里的 import、service、helper 或组件文件。",
+    "所有相对 import 路径指向的目标文件必须真实存在于仓库中，或者在本次 patch 中作为新增文件显式创建。",
+    "如果需要接口数据，优先复用上下文中已有的服务函数，不要动态 import 一个根本不存在的文件。",
     "如果需要测试，优先新增或修改与变更逻辑直接相关的轻量测试文件。",
+    "不要改变已有 helper 的公开返回结构，除非 PM 需求明确要求；例如 getArticleStats 必须只返回 { wordCount, readingMinutes }。",
+    "修复测试失败时，优先修复实现与既有 API 契约，禁止通过给返回对象新增无需求字段来适配测试。",
     "",
     "相关文件上下文：",
     fileContext,
@@ -393,6 +445,7 @@ async function askForFileWrites({
   previous,
   feedback,
   slice,
+  excludedFiles = [],
   purpose = "code_file_rewrite_fallback",
 }) {
   const boundary = buildBoundary(moduleStage);
@@ -403,6 +456,9 @@ async function askForFileWrites({
         JSON.stringify(slice, null, 2),
         "",
         "只返回这个 slice 必需修改的文件；如果这个 slice 在当前代码中无需修改，返回 {\"files\":[]}.",
+        excludedFiles.length > 0
+          ? `以下文件已由其它 slice 处理，本 slice 禁止再次返回这些文件，避免完整文件覆盖：${excludedFiles.join(", ")}`
+          : "",
       ].join("\n")
     : "";
   const prompt = [
@@ -417,8 +473,10 @@ async function askForFileWrites({
     "1. path 必须位于 frontend/src/ 或 backend/ 源码区内，且不能触碰硬禁止文件。",
     "2. content 必须是该文件的完整最终内容，不是 diff，不是片段。",
     "3. 既有文件必须基于下方“相关文件上下文”改写，不能假设另一个版本的源码。",
-    "4. 禁止发明未出现在相关文件上下文里的 import、service、helper 或组件；需要接口数据时优先复用上下文中已有服务。",
+    "4. 绝对禁止发明未出现在相关文件上下文里的 import、service、helper 或组件文件。所有相对 import 路径指向的目标文件必须真实存在于仓库中，或者在本次文件写入列表中显式创建。不要动态 import 一个根本不存在的文件。",
     "5. 只返回完成需求必需的文件。",
+    "6. 不要改变已有 helper 的公开返回结构，除非 PM 需求明确要求；例如 getArticleStats 必须只返回 { wordCount, readingMinutes }。",
+    "7. 修复测试失败时，优先修复实现与既有 API 契约，禁止通过给返回对象新增无需求字段来适配测试。",
     "",
     "PM 需求和澄清结果：",
     requirementText,
@@ -430,12 +488,24 @@ async function askForFileWrites({
     "方案约束：",
     JSON.stringify(planStage?.data || {}, null, 2),
     feedback ? ["", "上一次失败反馈：", formatFeedback(feedback)].join("\n") : "",
+    feedback?.currentDiff
+      ? [
+          "",
+          "当前 worktree 已保留的累计 diff：",
+          feedback.currentDiff,
+          "",
+          "增量修复要求：保留累计 diff 中已经正确的实现，只补齐失败反馈指出的缺口。",
+        ].join("\n")
+      : "",
     "",
-    "建议优先修改的文件（不是唯一可修改范围）：",
+    "稳定编辑边界（优先修改，不是唯一源码区）：",
     boundary.allowedFiles.map((file) => `- ${file}`).join("\n") || "- 无",
     "",
     "Audited Write Policy:",
-    "可以修改 frontend/src/ 与 backend/ 下的源码文件，但每个超出建议边界的修改都会被审计；必须保持最小必要改动。",
+    "既有文件优先修改稳定编辑边界；如果需求或失败反馈明确要求，可以修改 frontend/src/ 与 backend/ 下其它既有源码文件。",
+    "当上一次失败反馈包含 requiredChanges 时，本轮只修 requiredChanges 指向的问题和文件，不要重写无关模块；如果当前 worktree 已有正确改动，必须保留并在其上增量修复。",
+    "超出稳定编辑边界的既有源码改动会被记录为 audited_source_expansion，并由 code review 判断必要性。",
+    "新增文件仅允许放在允许新增文件的源码目录前缀内，且必须被真实调用链接入。",
     "禁止修改 node_modules、dist/build、package.json、package-lock.json、.env、backend/migrations、backend/seeders。",
     "",
     "允许新增文件的源码目录前缀：",
@@ -470,12 +540,19 @@ async function askForFileWrites({
   };
 }
 
-function applyFileWrites({ worktreePath, boundary, fileWrites, allowEmpty = false }) {
+function applyFileWritesDetailed({
+  worktreePath,
+  boundary,
+  fileWrites,
+  allowEmpty = false,
+  skipDisallowed = false,
+}) {
   const files = Array.isArray(fileWrites?.files) ? fileWrites.files : [];
   const touchedFiles = [];
+  const skippedFiles = [];
 
   if (files.length === 0) {
-    if (allowEmpty) return touchedFiles;
+    if (allowEmpty) return { touchedFiles, skippedFiles };
     const error = new Error("File rewrite fallback returned no files");
     error.status = 422;
     throw error;
@@ -491,7 +568,15 @@ function applyFileWrites({ worktreePath, boundary, fileWrites, allowEmpty = fals
       throw error;
     }
 
-    if (!isAllowed(file, boundary.allowedFiles, boundary.allowedNewFilePrefixes)) {
+    const fileExists = fs.existsSync(path.join(worktreePath, file));
+    if (!isAllowed(file, boundary.allowedFiles, boundary.allowedNewFilePrefixes, {
+      fileExists,
+      allowedExistingSourceRoots: boundary.allowedExistingSourceRoots || [],
+    })) {
+      if (skipDisallowed) {
+        skippedFiles.push({ file, reason: "disallowed_by_write_policy" });
+        continue;
+      }
       const error = new Error(`File rewrite fallback touches disallowed file: ${file}`);
       error.status = 422;
       throw error;
@@ -503,7 +588,14 @@ function applyFileWrites({ worktreePath, boundary, fileWrites, allowEmpty = fals
     touchedFiles.push(file);
   }
 
-  return [...new Set(touchedFiles)];
+  return {
+    touchedFiles: [...new Set(touchedFiles)],
+    skippedFiles,
+  };
+}
+
+function applyFileWrites(args) {
+  return applyFileWritesDetailed(args).touchedFiles;
 }
 
 async function applySlicedFileRewriteFallback({
@@ -536,6 +628,7 @@ async function applySlicedFileRewriteFallback({
       previous,
       feedback,
       slice,
+      excludedFiles: touchedFiles,
       purpose: `code_file_rewrite_slice_${slice.id}`,
     });
     const safeSliceId = String(slice.id || "slice").replace(/[^a-z0-9_-]/gi, "_");
@@ -544,17 +637,35 @@ async function applySlicedFileRewriteFallback({
       response.raw,
     );
 
-    const sliceTouchedFiles = applyFileWrites({
+    const parsedFiles = Array.isArray(response.parsed?.files) ? response.parsed.files : [];
+    const duplicateFiles = parsedFiles
+      .map((item) => String(item?.path || "").replace(/^\.\//, "").replaceAll("\\", "/"))
+      .filter((file) => touchedFiles.includes(file));
+    const dedupedResponse = {
+      ...response.parsed,
+      files: parsedFiles.filter((item) => {
+        const file = String(item?.path || "").replace(/^\.\//, "").replaceAll("\\", "/");
+        return !touchedFiles.includes(file);
+      }),
+    };
+
+    const sliceResult = applyFileWritesDetailed({
       worktreePath,
       boundary,
-      fileWrites: response.parsed,
+      fileWrites: dedupedResponse,
       allowEmpty: true,
+      skipDisallowed: true,
     });
+    const sliceTouchedFiles = sliceResult.touchedFiles;
     touchedFiles.push(...sliceTouchedFiles);
     sliceAttempts.push({
       sliceId: slice.id,
       status: sliceTouchedFiles.length > 0 ? "applied" : "no_files",
       touchedFiles: sliceTouchedFiles,
+      skippedFiles: [
+        ...sliceResult.skippedFiles,
+        ...duplicateFiles.map((file) => ({ file, reason: "already_written_by_previous_slice" })),
+      ],
     });
   }
 
@@ -597,6 +708,8 @@ async function generateAndApplyPatch({
   const requirementText = getRequirementText(requirementStage);
   const fileContext = buildFileContext(worktreePath, moduleStage);
   const boundary = buildBoundary(moduleStage);
+  const currentDiff = readCurrentDiff({ gitRootPath, targetRelativePath });
+  const effectiveFeedback = feedback && currentDiff ? { ...feedback, currentDiff } : feedback;
   let previous = null;
   let appliedBy = null;
   let touchedFiles = [];
@@ -609,7 +722,17 @@ async function generateAndApplyPatch({
     throw error;
   }
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  const skipPatchGeneration = isPatchFormatFailure(feedback);
+  if (skipPatchGeneration) {
+    attempts.push({
+      patchFile: null,
+      status: "skipped",
+      reason: "previous_patch_format_failure",
+      applyMethod: "file_rewrite_required",
+    });
+  }
+
+  for (let attempt = 0; !skipPatchGeneration && attempt < 3; attempt += 1) {
     const patchFile = attempt === 0 ? "model-generated.patch" : `model-repaired-${attempt}.patch`;
     const patch = normalizeUnifiedDiff(
       await askForPatch({
@@ -620,13 +743,13 @@ async function generateAndApplyPatch({
         moduleStage,
         fileContext,
         previous,
-        feedback,
+        feedback: effectiveFeedback,
       }),
     );
     savePatch(runDir, patchFile, patch);
 
     try {
-      touchedFiles = validatePatch(patch, boundary);
+      touchedFiles = validatePatch(patch, boundary, worktreePath);
       const applyMethod = applyPatchWithFallbacks({ gitRootPath, targetRelativePath, patch });
       writeAudit = auditTouchedFiles(touchedFiles, moduleStage);
       appliedBy = attempt === 0 ? "model_patch" : `model_patch_repair_${attempt}`;
@@ -655,7 +778,7 @@ async function generateAndApplyPatch({
         planStage,
         moduleStage,
         previous,
-        feedback,
+        feedback: effectiveFeedback,
       });
       touchedFiles = slicedResult.touchedFiles;
       attempts.push({
@@ -673,7 +796,7 @@ async function generateAndApplyPatch({
         moduleStage,
         fileContext,
         previous,
-        feedback,
+        feedback: effectiveFeedback,
       });
       fs.writeFileSync(path.join(runDir, "model-file-rewrite.json"), response.raw);
       try {
@@ -693,7 +816,7 @@ async function generateAndApplyPatch({
           planStage,
           moduleStage,
           previous,
-          feedback,
+          feedback: effectiveFeedback,
         });
         touchedFiles = slicedResult.touchedFiles;
         attempts.push({

@@ -1,4 +1,7 @@
 const path = require("path");
+const { loadLocalEnv } = require("./env");
+
+loadLocalEnv();
 
 const projectRoot = path.resolve(__dirname, "..");
 const defaultTargetRepo = path.resolve(

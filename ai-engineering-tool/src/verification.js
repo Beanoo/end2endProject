@@ -108,7 +108,7 @@ function runCommand({ cwd, args, fileName, runDir }) {
     fs.writeFileSync(path.join(runDir, fileName), output);
     return { command: args.join(" "), status: "passed", fileName };
   } catch (error) {
-    const output = `${error.stdout || ""}\n${error.stderr || ""}`;
+    const output = `${error.stdout || ""}\n${error.stderr || ""}\n${error.message || ""}`;
     fs.writeFileSync(path.join(runDir, fileName), output);
     return { command: args.join(" "), status: "failed", fileName };
   }
@@ -298,13 +298,39 @@ async function requestBackendProbe({ baseUrl, probe }) {
   };
 }
 
+function buildMandatoryBoundaryProbes(moduleStage) {
+  const mandatory = [];
+
+  if (hasDomain(moduleStage, "article") || hasAnyPath(moduleStage, [/backend\/controllers\/articles/])) {
+    mandatory.push({
+      name: "article-long-url-boundary",
+      setup: "signup",
+      method: "POST",
+      path: "/api/articles",
+      headers: { Authorization: "Token {{token}}" },
+      body: {
+        article: {
+          title: "boundary test",
+          description: "test",
+          body: "test",
+          coverImage: "{{longUrl}}",
+        },
+      },
+      expectedStatus: 201,
+      responseContains: [],
+    });
+  }
+
+  return mandatory;
+}
+
 async function planDynamicBackendProbes({ runDir, requirementStage, moduleStage, diff }) {
   const touchesBackend = hasAnyPath(moduleStage, [
     /backend\/controllers\//,
     /backend\/routes\//,
     /backend\/models\//,
   ]);
-  if (!touchesBackend) return [];
+  if (!touchesBackend) return buildMandatoryBoundaryProbes(moduleStage);
 
   const prompt = [
     "你是 Conduit/RealWorld 仓库的验证用例规划 Agent。只输出 JSON，不要 markdown。",
@@ -364,8 +390,11 @@ async function planDynamicBackendProbes({ runDir, requirementStage, moduleStage,
     .filter((probe) => probe && typeof probe.path === "string" && probe.path.startsWith("/api/"))
     .filter((probe) => ["GET", "POST", "PUT", "DELETE", undefined].includes(probe.method))
     .slice(0, 2);
-  fs.writeFileSync(path.join(runDir, "verification-probes.json"), JSON.stringify(safeProbes, null, 2));
-  return safeProbes;
+
+  const allProbes = [...buildMandatoryBoundaryProbes(moduleStage), ...safeProbes];
+  const deduped = [...new Map(allProbes.map((p) => [p.name, p])).values()].slice(0, 3);
+  fs.writeFileSync(path.join(runDir, "verification-probes.json"), JSON.stringify(deduped, null, 2));
+  return deduped;
 }
 
 function stopProcess(child) {
@@ -452,6 +481,51 @@ function saveDiff({ gitRootPath, targetRelativePath, runDir }) {
   return diff;
 }
 
+function listDiffFiles(diff) {
+  return [...diff.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)].map((match) => match[2]);
+}
+
+function hasBackendDiff(diff) {
+  return listDiffFiles(diff).some((file) => file.startsWith("backend/"));
+}
+
+function runViteDependencyScan({ worktreePath, runDir }) {
+  const frontendPath = path.join(worktreePath, "frontend");
+  if (!fs.existsSync(frontendPath)) {
+    return { status: "skipped", message: "frontend 目录不存在，跳过 vite 依赖扫描" };
+  }
+
+  const viteConfigPath = path.join(frontendPath, "vite.config.js");
+  const viteConfigTsPath = path.join(frontendPath, "vite.config.ts");
+  if (!fs.existsSync(viteConfigPath) && !fs.existsSync(viteConfigTsPath)) {
+    return { status: "skipped", message: "未找到 vite.config，跳过 vite 依赖扫描" };
+  }
+
+  const viteBin = path.join(worktreePath, "node_modules", ".bin", "vite");
+  const scanResult = runCommand({
+    cwd: worktreePath,
+    args: [viteBin, "optimize", "--force", "--config", path.join("frontend", "vite.config.js")],
+    fileName: "vite-dependency-scan-output.txt",
+    runDir,
+  });
+
+  if (scanResult.status !== "passed") {
+    return {
+      status: "failed",
+      message: "vite 依赖预扫描失败，存在无法解析的 import 路径",
+      command: scanResult.command,
+      fileName: scanResult.fileName,
+    };
+  }
+
+  return {
+    status: "passed",
+    message: "vite 依赖预扫描通过，所有 import 路径可正常解析",
+    command: scanResult.command,
+    fileName: scanResult.fileName,
+  };
+}
+
 async function runVerification({
   worktreePath,
   gitRootPath = worktreePath,
@@ -463,6 +537,21 @@ async function runVerification({
 }) {
   const dependencies = ensureNodeModules({ worktreePath, targetRepo, runDir });
   const runtime = ensureLocalRuntimeFiles({ worktreePath, targetRepo, runDir });
+
+  const viteScan = runViteDependencyScan({ worktreePath, runDir });
+  if (viteScan.status === "failed") {
+    return {
+      name: "verification",
+      status: "blocked",
+      summary: `vite 依赖扫描失败：${viteScan.message}。存在无法解析的 import 路径，必须修复后再继续。`,
+      data: {
+        viteScan,
+        dependencies,
+        runtime,
+      },
+    };
+  }
+
   const vitestConfig = path.join(worktreePath, ".vitest-p1.config.mjs");
   fs.writeFileSync(
     vitestConfig,
@@ -489,16 +578,25 @@ async function runVerification({
     runDir,
   });
   const diff = saveDiff({ gitRootPath, targetRelativePath, runDir });
-  const dynamicProbes = await planDynamicBackendProbes({ runDir, requirementStage, moduleStage, diff });
-  const backendSmoke = await runBackendSmoke({ worktreePath, runDir, moduleStage, dynamicProbes });
+  const shouldRunBackendSmoke = hasBackendDiff(diff);
+  const dynamicProbes = shouldRunBackendSmoke
+    ? await planDynamicBackendProbes({ runDir, requirementStage, moduleStage, diff })
+    : [];
+  const backendSmoke = shouldRunBackendSmoke
+    ? await runBackendSmoke({ worktreePath, runDir, moduleStage, dynamicProbes })
+    : { status: "skipped", message: "本次 diff 未修改 backend，跳过后端 smoke。" };
   const passed =
-    test.status === "passed" && build.status === "passed" && backendSmoke.status === "passed";
+    viteScan.status === "passed" &&
+    test.status === "passed" &&
+    build.status === "passed" &&
+    ["passed", "skipped"].includes(backendSmoke.status);
 
   return {
     name: "verification",
     status: passed ? "completed" : "blocked",
-    summary: `测试 ${test.status}，前端构建 ${build.status}，后端 smoke ${backendSmoke.status}。`,
+    summary: `vite 扫描 ${viteScan.status}，测试 ${test.status}，前端构建 ${build.status}，后端 smoke ${backendSmoke.status}。`,
     data: {
+      viteScan,
       test,
       build,
       backendSmoke,

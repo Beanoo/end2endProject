@@ -117,14 +117,14 @@ runWorkflow
 
 ### 4.3 模型层
 
-P1 已经接入火山方舟 Chat Completions：
+P1 已经接入 OpenAI-compatible Chat Completions，模型、base URL 和 API key 均可配置：
 
 ```text
-ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-ARK_MODEL=ep-20260514110933-mzh58
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-chat
 ```
 
-API key 通过环境变量传入，不写入源码、不写入文档、不写入运行产物。
+API key 通过环境变量或本地 `.env` 传入，不写入源码、不写入文档、不写入运行产物。旧的 `ARK_*` 配置仍保留兼容。
 
 成功运行中有两次真实模型调用：
 
